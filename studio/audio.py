@@ -21,7 +21,7 @@ def decode(source, target, start=0, duration=None, rate=44100, channels=1):
     if duration is not None:
         args += ['-t', str(duration)]
     args += ['-vn', '-ar', str(rate), '-ac', str(channels), '-c:a', 'pcm_s16le', str(target)]
-    result = subprocess.run(args, capture_output=True, text=True, creationflags=0x08000000)
+    result = subprocess.run(args, capture_output=True, text=True, check=False, creationflags=0x08000000)
     if result.returncode:
         raise AudioError('Could not read this audio. Try a WAV, MP3, FLAC, or M4A file.')
     return Path(target)

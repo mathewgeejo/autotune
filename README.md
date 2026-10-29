@@ -36,7 +36,7 @@ Smoke checks run actual model inference and save timing/memory reports alongside
 
 ## Engines and licenses
 
-- [Seed-VC](https://github.com/Plachtaa/seed-vc), GPL-3.0, pinned to `51383efd921027683c89e5348211d93ff12ac2a8`. Setup patches Whisper's forced fp16 dtype to float32 for CPU use; inference uses the upstream singing pipeline with pitch and timing preserved.
+- [Seed-VC](https://github.com/Plachtaa/seed-vc), GPL-3.0, pinned to `51383efd921027683c89e5348211d93ff12ac2a8`. Setup patches Whisper's forced fp16 dtype to float32 for CPU use and reduces the inference cache to 4096 frames (sufficient for its 30-second context). Inference uses the upstream singing pipeline with pitch and timing preserved.
 - [Demucs](https://github.com/facebookresearch/demucs), MIT, for vocal separation.
 - [Basic Pitch](https://github.com/spotify/basic-pitch), Apache-2.0, using ONNX on CPU for audio-to-MIDI.
 - [FluidSynth](https://github.com/FluidSynth/fluidsynth), LGPL-2.1, and [GeneralUser GS](https://github.com/mrbumpy409/GeneralUser-GS), with its soundfont license downloaded by setup.

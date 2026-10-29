@@ -1,5 +1,5 @@
 """Voice Studio: a private, local browser interface for audio transformation."""
-from studio.paths import configure, DATA, ROOT
+from studio.paths import configure, DATA
 configure()
 
 import argparse
@@ -72,12 +72,12 @@ def poll(job_id, delivered):
     elapsed = job['elapsed']
     state = job['state']
     text = f"{state.upper()}  ·  {int(elapsed)//60:02d}:{int(elapsed)%60:02d} elapsed  ·  {job['peak_mb']:.0f} MB peak\n{job['status']['stage']}"
-    if state == 'running':
-        return (text,) + (skip(),)*10
-    if delivered == job_id:
-        return (text,) + (skip(),)*10
     log_path = job['folder'] / 'worker.log'
     log_text = log_path.read_text(encoding='utf-8', errors='replace')[-14000:]
+    if state == 'running':
+        return (text, log_text, None) + (skip(),)*8
+    if delivered == job_id:
+        return (text,) + (skip(),)*10
     if state != 'complete':
         return (text, log_text, str(log_path), skip(), skip(), skip(), skip(), skip(), skip(), skip(), job_id)
     result = job['result']
@@ -121,17 +121,19 @@ def clear_references():
 
 def create_app():
     theme = gr.themes.Base(primary_hue='violet', secondary_hue='indigo', neutral_hue='slate',
-                           font=['system-ui', 'Segoe UI', 'sans-serif']).set(
+                           font=['system-ui', 'Segoe UI', 'sans-serif'],
+                           font_mono=['Consolas', 'monospace']).set(
         body_background_fill='#0c0e16', body_background_fill_dark='#0c0e16',
         block_background_fill='#151824', block_background_fill_dark='#151824',
         block_border_color='#292d3f', block_border_color_dark='#292d3f',
         input_background_fill='#0f121d', input_background_fill_dark='#0f121d',
         body_text_color='#e5e6ef', body_text_color_dark='#e5e6ef',
         block_label_text_color='#adb3c8', block_label_text_color_dark='#adb3c8',
+        block_label_background_fill='#151824', block_label_background_fill_dark='#151824',
         button_secondary_background_fill='#262b3e', button_secondary_background_fill_dark='#262b3e',
         button_secondary_text_color='#e5e6ef', button_secondary_text_color_dark='#e5e6ef')
     with gr.Blocks(title='Voice Studio · Local Audio Lab', theme=theme, css=CSS,
-                   analytics_enabled=False, delete_cache=(3600, 86400)) as demo:
+                   analytics_enabled=False, delete_cache=(3600, 86400), fill_width=True) as demo:
         gr.HTML('''<div class="studio-header"><div class="brand">◉ VOICE STUDIO</div>
         <h1>Your voice. A new possibility.</h1>
         <p>Turn a melody into an instrument, or give your singing a different voice.
@@ -178,8 +180,8 @@ def create_app():
                 gr.HTML('<div class="step-label">03 / LISTEN & EXPORT</div>')
                 output = gr.Audio(label='Your new sound', interactive=False)
                 with gr.Row():
-                    wav = gr.File(label='Download WAV', interactive=False)
-                    midi = gr.File(label='Download MIDI', interactive=False)
+                    wav = gr.File(label='Download WAV', interactive=False, height=90, min_width=160)
+                    midi = gr.File(label='Download MIDI', interactive=False, height=90, min_width=160)
                 status = gr.Textbox(label='Studio activity', value='Ready when you are. Record your voice to begin.',
                                     lines=4, interactive=False, elem_id='status')
                 with gr.Accordion('Processing details', open=False):

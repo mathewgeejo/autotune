@@ -17,7 +17,8 @@ if (!(Test-Path '.venv/Scripts/python.exe')) {
 }
 & $uv pip install --python .venv/Scripts/python.exe torch==2.4.1 torchaudio==2.4.1 torchvision==0.19.1 --no-deps --index-url https://download.pytorch.org/whl/cpu
 if ($LASTEXITCODE -ne 0) { throw 'CPU audio engine installation failed.' }
-& $uv pip install --python .venv/Scripts/python.exe -r requirements.txt
+$requirements = if (Test-Path 'requirements.lock.txt') { 'requirements.lock.txt' } else { 'requirements.txt' }
+& $uv pip install --python .venv/Scripts/python.exe -r $requirements
 if ($LASTEXITCODE -ne 0) { throw 'Package installation failed.' }
 & .venv/Scripts/python.exe scripts/install_assets.py
 if ($LASTEXITCODE -ne 0) { throw 'Audio asset installation failed. Run setup again to resume.' }

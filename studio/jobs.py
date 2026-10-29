@@ -91,7 +91,7 @@ class JobManager:
             job['cancelled'] = True
             # taskkill /T is necessary: Demucs/ffmpeg are children of the worker.
             subprocess.run(['taskkill', '/PID', str(job['process'].pid), '/T', '/F'],
-                           capture_output=True, creationflags=0x08000000)
+                           capture_output=True, check=False, creationflags=0x08000000)
             return 'Cancelling… Audio models will be released when the worker exits.'
 
     def snapshot(self, job_id):

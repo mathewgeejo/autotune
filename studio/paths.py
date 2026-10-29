@@ -21,3 +21,11 @@ def configure():
     os.environ['OMP_NUM_THREADS'] = '2'
     os.environ['MKL_NUM_THREADS'] = '2'
     os.environ['TOKENIZERS_PARALLELISM'] = 'false'
+    # Gradio checks its own local URL at startup. System HTTP proxies must not
+    # intercept requests between the browser interface and the local server.
+    bypass = os.environ.get('NO_PROXY', os.environ.get('no_proxy', ''))
+    hosts = [item for item in bypass.split(',') if item]
+    for host in ('localhost', '127.0.0.1', '::1'):
+        if host not in hosts:
+            hosts.append(host)
+    os.environ['NO_PROXY'] = os.environ['no_proxy'] = ','.join(hosts)

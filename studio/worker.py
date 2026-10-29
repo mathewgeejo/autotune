@@ -10,7 +10,7 @@ import sys
 import traceback
 from urllib.parse import urlparse
 
-from studio.paths import configure, ROOT, REFERENCES, MODELS, SEED
+from studio.paths import configure, ROOT, REFERENCES, SEED
 
 configure()
 
@@ -117,7 +117,7 @@ def instrument(request, folder):
     stage(folder, 'Listening for notes and expression')
     from basic_pitch import ICASSP_2022_MODEL_PATH
     from basic_pitch.inference import predict, Model
-    model_path = Path(str(ICASSP_2022_MODEL_PATH) + '.onnx')
+    model_path = Path(ICASSP_2022_MODEL_PATH).with_suffix('.onnx')
     model = Model(model_path)
     sensitivity = float(request.get('sensitivity', 0.5))
     _, midi, _ = predict(str(source), model_or_model_path=model,
@@ -219,6 +219,9 @@ def main():
         message = str(exc) if isinstance(exc, AudioError) else (
             'The local audio engine could not finish. Check the job log below for details. '
             'If a download failed, check your connection and retry.')
+        if isinstance(exc, MemoryError) or 'not enough memory' in str(exc).lower():
+            message = ('This conversion ran out of memory. Close other apps, use a shorter recording '
+                       'and reference section, then retry with Preview quality.')
         stage(folder, message)
         (folder / 'error.txt').write_text(str(exc), encoding='utf-8')
         sys.exit(1)

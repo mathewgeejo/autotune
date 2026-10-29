@@ -37,9 +37,23 @@ def main():
     text = inference.read_text(encoding='utf-8')
     text = text.replace('torch_dtype=torch.float16).to(device)',
                         'torch_dtype=(torch.float16 if device.type == "cuda" else torch.float32)).to(device)')
+    # Upstream's 30-second context is <2600 frames. 4096 accommodates it without
+    # allocating an unnecessarily large 8192-frame transformer KV cache on CPU.
+    text = text.replace('max_seq_length=8192', 'max_seq_length=4096')
     inference.write_text(text, encoding='utf-8')
+    # This singing configuration does not use vector quantization. Lazy-loading
+    # that optional branch avoids installing the unrelated DAC training stack.
+    regulator = seed / 'modules/length_regulator.py'
+    regulator_text = regulator.read_text(encoding='utf-8')
+    regulator_text = ''.join(line for line in regulator_text.splitlines(keepends=True)
+                             if line.strip() != 'from dac.nn.quantize import VectorQuantize')
+    regulator_text = regulator_text.replace('if vector_quantize:\n                self.vq',
+        'if vector_quantize:\n                from dac.nn.quantize import VectorQuantize\n                self.vq')
+    regulator.write_text(regulator_text, encoding='utf-8')
     (seed / 'VOICE_STUDIO_PATCH.txt').write_text(
-        f'Upstream revision: {SEED_REVISION}\nCPU Whisper dtype changed to float32.\n', encoding='utf-8')
+        f'Upstream revision: {SEED_REVISION}\nCPU Whisper dtype changed to float32.\n'
+        'Transformer inference cache reduced to 4096 frames (30-second context fits).\n'
+        'Optional DAC vector quantizer import is lazy; singing configuration does not use it.\n', encoding='utf-8')
     fluid_dir = vendor / 'fluidsynth'
     if not list(fluid_dir.rglob('fluidsynth.exe')):
         archive = ROOT / '.tools/fluidsynth.zip'
