@@ -1,5 +1,4 @@
 """Download local runtime assets; rerunning resumes an incomplete setup."""
-import json
 from pathlib import Path
 import urllib.request
 import zipfile
@@ -65,10 +64,8 @@ def main():
     download('https://raw.githubusercontent.com/mrbumpy409/GeneralUser-GS/main/GeneralUser-GS.sf2', sf)
     download('https://raw.githubusercontent.com/mrbumpy409/GeneralUser-GS/main/README.md', sf.parent / 'GeneralUser-README.md')
     # Fetch the soundfont documentation, including its redistribution license.
-    listing = json.load(urllib.request.urlopen('https://api.github.com/repos/mrbumpy409/GeneralUser-GS/contents/documentation'))
-    for item in listing:
-        if item.get('download_url') and ('license' in item['name'].lower()):
-            download(item['download_url'], sf.parent / item['name'])
+    download('https://raw.githubusercontent.com/mrbumpy409/GeneralUser-GS/main/documentation/LICENSE.txt',
+             sf.parent / 'LICENSE.txt')
     print('Runtime assets ready. AI weights download on first use.', flush=True)
 
 

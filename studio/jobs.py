@@ -72,7 +72,11 @@ class JobManager:
             job['log'].close()
             job['elapsed'] = time.monotonic() - job['started']
             result_path = job['folder'] / 'result.json'
-            job['result'] = json.loads(result_path.read_text(encoding='utf-8')) if result_path.exists() else {}
+            try:
+                job['result'] = json.loads(result_path.read_text(encoding='utf-8')) if result_path.exists() else {}
+            except (OSError, ValueError):
+                # Cancellation can interrupt the worker while it writes JSON.
+                job['result'] = {}
             job['state'] = ('cancelled' if job['cancelled'] else
                             'complete' if process.returncode == 0 and job['result'] else 'failed')
             if self.active == job_id:
@@ -116,7 +120,11 @@ class JobManager:
                 resolved = folder.resolve()
                 if resolved.parent != DATA.resolve():
                     raise ValueError('Invalid storage directory.')
-                shutil.rmtree(resolved, ignore_errors=True)
+                try:
+                    if resolved.exists():
+                        shutil.rmtree(resolved)
+                except OSError as exc:
+                    raise BusyError('Some audio files are still in use. Stop playback and retry deleting them.') from exc
                 resolved.mkdir(parents=True, exist_ok=True)
             if not references:
                 self.jobs.clear()

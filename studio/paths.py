@@ -1,4 +1,5 @@
 import os
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -21,6 +22,13 @@ def configure():
     os.environ['OMP_NUM_THREADS'] = '2'
     os.environ['MKL_NUM_THREADS'] = '2'
     os.environ['TOKENIZERS_PARALLELISM'] = 'false'
+    os.environ['PYTHONIOENCODING'] = 'utf-8'
+    os.environ['HF_XET_RECONSTRUCT_WRITE_SEQUENTIALLY'] = '1'
+    os.environ['HF_XET_NUM_CONCURRENT_RANGE_GETS'] = '4'
+    os.environ['MPLCONFIGDIR'] = str(MODELS / 'matplotlib')
+    os.environ['MPLBACKEND'] = 'Agg'
+    if hasattr(sys.stdout, 'reconfigure'):
+        sys.stdout.reconfigure(encoding='utf-8')
     # Gradio checks its own local URL at startup. System HTTP proxies must not
     # intercept requests between the browser interface and the local server.
     bypass = os.environ.get('NO_PROXY', os.environ.get('no_proxy', ''))

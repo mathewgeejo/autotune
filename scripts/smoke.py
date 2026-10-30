@@ -1,6 +1,6 @@
 """Exercise actual local models, recording elapsed time and peak worker memory.
 
-Usage: .venv/Scripts/python.exe scripts/smoke.py instrument|singer|prepare
+Usage: .venv/Scripts/python.exe scripts/smoke.py instrument|singer|prepare|link
 Singing smoke uses short upstream examples, downloaded only for this check.
 """
 import json
@@ -38,8 +38,9 @@ def main():
         source = folder / 'upstream-singing.wav'
         if not source.exists():
             urllib.request.urlretrieve('https://raw.githubusercontent.com/Plachtaa/seed-vc/51383efd921027683c89e5348211d93ff12ac2a8/examples/source/TECHNOPOLIS%20-%202085%20%5Bvocals%5D_%5Bcut_14sec%5D.wav', source)
-        if mode == 'prepare':
-            payload = {'file': str(source)}
+        if mode in ('prepare', 'link'):
+            payload = ({'file': str(source)} if mode == 'prepare' else {'url':
+                'https://raw.githubusercontent.com/Plachtaa/seed-vc/51383efd921027683c89e5348211d93ff12ac2a8/examples/source/TECHNOPOLIS%20-%202085%20%5Bvocals%5D_%5Bcut_14sec%5D.wav'})
         else:
             ref = folder / 'upstream-reference.wav'
             if not ref.exists():
@@ -50,7 +51,7 @@ def main():
             payload = {'source': str(source), 'reference': str(target), 'start': 0, 'end': 5,
                        'ref_start': 0, 'ref_duration': 5, 'steps': 10}
     manager = JobManager()
-    job_id = manager.submit(mode, payload)
+    job_id = manager.submit('prepare' if mode == 'link' else mode, payload)
     previous = ''
     while True:
         job = manager.snapshot(job_id)

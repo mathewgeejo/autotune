@@ -20,6 +20,8 @@ First use of vocal separation and singer conversion downloads public model weigh
 
 This PC has an Intel i3 CPU and around 8 GB RAM. Processing happens after recording, one job at a time. Singing conversion can take several minutes or longer. The activity panel reports elapsed time and peak worker memory. Cancel stops the worker and its child processes, freeing loaded models. Preview quality uses 10 diffusion steps, Standard 20, and Detailed 30.
 
+Measured here: a 5-second singer preview required about **3 minutes 12 seconds of inference**, excluding model loading and downloads. A warm instrument conversion took about **14 seconds**. Start with short clips. See [VERIFICATION.md](VERIFICATION.md) for the checks and their limits.
+
 All audio is stored under `data/`: `jobs/` holds recordings, results and logs, `references/` holds extracted vocal stems, and `tmp/` holds interface audio. The Local storage controls delete recordings/exports or cached references. Model weights remain in `data/models/` and `vendor/seed-vc/checkpoints/` for reuse. Setup assets live in `vendor/`; the Python runtime and installer cache live in `.tools/`.
 
 ## Development and focused checks
@@ -29,10 +31,14 @@ All audio is stored under `data/`: `jobs/` holds recordings, results and logs, `
 .venv/Scripts/python.exe scripts/smoke.py instrument
 .venv/Scripts/python.exe scripts/smoke.py singer
 .venv/Scripts/python.exe scripts/smoke.py prepare
+.venv/Scripts/python.exe scripts/smoke.py link
+.venv/Scripts/python.exe scripts/download_models.py
 .venv/Scripts/python.exe app.py --no-browser
 ```
 
 Smoke checks run actual model inference and save timing/memory reports alongside their job logs. Singer checks use upstream example clips and do not assess similarity to your own recordings. No frontend build is needed. Do not run routine builds after edits.
+
+`download_models.py` optionally caches all models ahead of time for offline use. Setup uses `requirements.lock.txt` to reproduce the installed package versions; direct dependencies are listed in `requirements.txt`.
 
 ## Engines and licenses
 

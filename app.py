@@ -60,13 +60,19 @@ def convert(mode, source, start, end, reference, ref_start, ref_duration, qualit
 
 
 def poll(job_id, delivered):
+    # Storage deletion and timer delivery must not race over result/log files.
+    with manager.lock:
+        return _poll(job_id, delivered)
+
+
+def _poll(job_id, delivered):
     skip = gr.skip
     # status, log, log-file, audio, wav, midi, reference-state, preview, ref-start,
     # ref-duration, delivered-state
     if not job_id:
         return (skip(),) * 11
     job = manager.snapshot(job_id)
-    if not job:
+    if not job or not job['folder'].exists():
         return ('Audio cleared. Ready for a new recording.', '', None, None, None, None,
                 skip(), skip(), skip(), skip(), '')
     elapsed = job['elapsed']
@@ -148,7 +154,7 @@ def create_app():
             with gr.Column(scale=6):
                 gr.HTML('<div class="step-label">01 / YOUR PERFORMANCE</div>')
                 source = gr.Audio(sources=['microphone', 'upload'], type='filepath',
-                                  label='Record or upload your voice', format='wav')
+                                  label='Record or upload your voice', format=None)
                 with gr.Row():
                     start = gr.Number(value=0, minimum=0, label='Start time (seconds)')
                     end = gr.Number(value=0, minimum=0, label='End time (0 = use recording)')

@@ -8,9 +8,10 @@ import shutil
 import subprocess
 import sys
 import traceback
+import urllib.request
 from urllib.parse import urlparse
 
-from studio.paths import configure, ROOT, REFERENCES, SEED
+from studio.paths import configure, ROOT, REFERENCES, MODELS, SEED
 
 configure()
 
@@ -24,6 +25,34 @@ def stage(folder, text):
 
 def command(args, cwd=None):
     subprocess.run([str(a) for a in args], cwd=cwd, check=True, creationflags=0x08000000)
+
+
+def separation_weights(folder):
+    """Use a bounded, visible download instead of torch.hub's unbounded socket."""
+    target = MODELS / 'torch/hub/checkpoints/955717e8-8726e21a.th'
+    if target.exists():
+        return
+    target.parent.mkdir(parents=True, exist_ok=True)
+    partial = target.with_suffix('.download')
+    url = 'https://dl.fbaipublicfiles.com/demucs/hybrid_transformer/955717e8-8726e21a.th'
+    for attempt in range(3):
+        try:
+            digest = hashlib.sha256()
+            downloaded = 0
+            with urllib.request.urlopen(url, timeout=60) as response, partial.open('wb') as out:
+                while block := response.read(1024 * 1024):
+                    out.write(block)
+                    digest.update(block)
+                    downloaded += len(block)
+                    stage(folder, f'Downloading vocal separator · {downloaded // 1024**2} / 80 MB')
+            if not digest.hexdigest().startswith('8726e21a'):
+                raise ValueError('Vocal separation model download failed its checksum. Please retry.')
+            partial.replace(target)
+            return
+        except (OSError, TimeoutError):
+            if attempt == 2:
+                raise
+            stage(folder, 'Retrying vocal separation model download')
 
 
 def import_song(request, folder):
@@ -42,6 +71,7 @@ def import_song(request, folder):
             return 'Reference download exceeds 150 MB. Upload a smaller audio file.'
     options = {
         'format': 'bestaudio/best', 'noplaylist': True,
+        'playlistend': 1,
         'outtmpl': str(folder / 'download.%(ext)s'), 'max_filesize': 150 * 1024**2,
         'match_filter': limits, 'ffmpeg_location': ffmpeg(),
         'socket_timeout': 30, 'retries': 2,
@@ -84,6 +114,8 @@ def prepare(request, folder):
         stage(folder, 'Reusing cached reference vocals')
     else:
         stage(folder, 'Separating vocals locally · first use downloads the separation model')
+        separation_weights(folder)
+        stage(folder, 'Separating reference vocals on CPU')
         command([sys.executable, '-m', 'demucs', '--two-stems', 'vocals', '-n', 'htdemucs',
                  '-d', 'cpu', '--shifts', '0', '--segment', '5', '--overlap', '0.1',
                  '-j', '1', '-o', folder / 'separated', decoded])

@@ -33,6 +33,8 @@ def test_cancel_kills_children_and_allows_next_task(tmp_path, monkeypatch):
         while not child_pid_file.exists() and time.monotonic() < deadline:
             time.sleep(0.1)
         child = int(child_pid_file.read_text())
+        # A cancellation during result writing must still release the job slot.
+        (tmp_path/first/'result.json').write_text('{', encoding='utf-8')
         manager.cancel()
         while manager.active and time.monotonic() < deadline:
             time.sleep(0.1)
@@ -42,3 +44,23 @@ def test_cancel_kills_children_and_allows_next_task(tmp_path, monkeypatch):
         assert second != first
     finally:
         manager.cancel()
+
+
+def test_storage_cleanup_preserves_models_and_rejects_outside_paths(tmp_path, monkeypatch):
+    monkeypatch.setattr(jobs, 'DATA', tmp_path)
+    monkeypatch.setattr(jobs, 'JOBS', tmp_path/'jobs')
+    monkeypatch.setattr(jobs, 'REFERENCES', tmp_path/'references')
+    for folder in ('jobs', 'references', 'models', 'tmp'):
+        target = tmp_path/folder
+        target.mkdir()
+        (target/'audio-or-model.bin').write_bytes(b'content')
+    manager = jobs.JobManager()
+    manager.clear()
+    assert not list((tmp_path/'jobs').iterdir())
+    assert (tmp_path/'references/audio-or-model.bin').exists()
+    manager.clear(references=True)
+    assert not list((tmp_path/'references').iterdir())
+    assert (tmp_path/'models/audio-or-model.bin').exists()
+    monkeypatch.setattr(jobs, 'JOBS', tmp_path.parent)
+    with pytest.raises(ValueError, match='Invalid storage'):
+        manager.clear()
