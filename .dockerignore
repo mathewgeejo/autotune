@@ -1,0 +1,13 @@
+.git
+.venv
+.tools
+data
+vendor
+__pycache__
+**/__pycache__
+.pytest_cache
+.ruff_cache
+.env
+.env.*
+*.log
+tests

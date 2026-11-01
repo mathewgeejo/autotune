@@ -1,26 +1,39 @@
-# Verification — 29 October 2026
+# Voice-cloning verification - 2 November 2026
 
-Tested locally on Windows, Intel Core i3-1115G4, approximately 8 GB RAM, CPU inference.
+Tested on Windows, Intel Core i3-1115G4 (two physical cores), 7.7 GiB RAM, no CUDA GPU. These results describe the new sample-to-text speech pipeline; the old singing and instrument checks do not establish voice-cloning behavior.
 
-| Flow | Result | Evidence |
-| --- | --- | --- |
-| Focused tests | Passed | Six tests: trimming and limits; silence/corrupt input; reference selection; invalid trim numbers; cancellation of parent/child processes including interrupted JSON writes; storage deletion preserving models and rejecting outside paths. |
-| Instrument engine | Passed | Actual Basic Pitch ONNX inference detected the four expected MIDI notes (57, 60, 64, 69). FluidSynth rendered a nonempty WAV and MIDI export. |
-| Browser upload → output | Passed | Chrome uploaded a WAV, ran the actual engine, rendered the output waveform and WAV/MIDI links, opened Singer controls, and rendered mobile layout without JavaScript errors. Warm conversion: 14 seconds; sampled worker memory peak: 206 MB. |
-| Browser microphone → output | Passed | Chrome used a simulated microphone, recorded audio, uploaded it, and completed actual instrument conversion without JavaScript errors. No physical microphone was accessed. |
-| Vocal extraction | Passed | Demucs separated a 14.56-second reference and automatically selected a 10-second vocal section. 110 seconds elapsed; approximately 976 MB sampled worker memory peak. |
-| Song link and cache reuse | Passed | Imported a public direct audio URL with yt-dlp, decoded it, and reused its cached vocal reference. Completed in 9.3 seconds. |
-| Singer engine | Passed | Actual Seed-VC singing model, CPU, 5-second input/reference, Preview/10 steps. Output: 4.992-second WAV at 44,100 Hz, finite samples, RMS 0.344, peak 0.950. |
-| Singer performance | Measured | Approximately 191.6 seconds inference, excluding loading/download waits. Total test elapsed 688 seconds because it also waited for the remaining model download. Sampled worker memory peak: approximately 1,600 MB RSS; this does not measure committed or swapped memory. |
-| Offline model readiness | Passed | All required files resolved from cache with `HF_HUB_OFFLINE=1` and `TRANSFORMERS_OFFLINE=1`. File-based transformations use these local engines; importing links still needs internet. |
-| Setup and static checks | Passed | All 129 installed packages compatible; locked dependency installation dry-run requires no changes; PowerShell setup parses; asset setup reruns successfully; Ruff correctness checks pass. |
+| Requirement | Current evidence |
+| --- | --- |
+| Voice sample + typed text -> generated speech | Real Chatterbox Turbo ONNX synthesis with two different public speech samples (Dave and Jo from the [NeuTTS sample directory](https://github.com/neuphonic/neutts/tree/main/samples)). New words are synthesized using reference conditioning, with no performance recording or reference transcript. |
+| Spoken text accuracy | Local Whisper-small recognized every word of the 4.28-second test output, ignoring punctuation/case: "Hello there. This is a new sentence, spoken using the voice in the sample." Expected and recognized text are recorded in `data/smoke/transcript-check.json`. The full two-passage output also matches every word after normalizing punctuation/case and 9/nine, including the final words "see you soon" (`data/smoke/long-text-report.json`). |
+| Speaker identity changes with the reference | Quantized speaker-encoder cosine similarity: Dave reference/output **0.870**, Jo reference/output **0.916**. Cross-speaker comparisons were lower (**0.561** and **0.475**). Evidence: `data/smoke/voice-similarity.json`. These are model-based similarity scores, not percentages or proof of an indistinguishable human voice. |
+| Faster CPU generation | Same machine, same single-thread language-model benchmark: 8-bit graph took approximately **3.1 s per decoding step**, 4-bit graph approximately **0.03-0.08 s**. The app selects the 4-bit language model with two threads, while preserving 8-bit reference encoding, embeddings, and waveform decoder. |
+| Cold/warm runtime | A 4.28-second WAV took **21.9 s cold** (models cached, sessions loaded on demand) and **12.7 s warm**. Same worker PID and cached voice reused. Peak sampled worker RSS approximately **882 / 924 MB**. Evidence: `data/smoke/cloning-report.json` and corresponding job metrics. Model-download time is excluded. |
+| Browser upload and export | Chrome uploaded Dave and Jo samples, submitted new text twice, displayed generated waveforms and WAV download links, and passed desktop/mobile layout checks. The final rerun had no JavaScript errors. Screenshots: `data/smoke/cloning-result.png`, `cloning-desktop.png`, `cloning-mobile.png`. |
+| Long text and early preview | Actual two-passage generation produced **16.48 s** of speech in **74.6 s** in the browser, approximately **1,203 MB** peak worker RSS. The first passage was playable while the second was generated. The final WAV contains exactly the sum of both passage frame counts, in order (**395,520 frames**). Evidence: `data/smoke/long-text-report.json`. |
+| Microphone flow | Chrome recorded a simulated microphone, submitted typed text, and generated **3.12 s** of speech in **17.6 s**, without JavaScript errors. No physical microphone was accessed. Screenshot: `data/smoke/studio-microphone.png`; job `3b703993f5a3458fbe4feeb94d0333a6`. |
+| Cancellation and recovery | Cancelled real active synthesis, confirmed every worker-tree PID was gone, then generated real speech in a fresh worker. This ran offline in a clean environment with no Torch installed. Evidence: `data/smoke/lifecycle-report.json`. |
+| Offline use | Browser synthesis and clean-runtime cancellation/recovery ran with `HF_HUB_OFFLINE=1` and `TRANSFORMERS_OFFLINE=1`. Required model files were loaded from the project cache. |
+| Fresh installation dependencies | Created `.tools/runtime-check` from the locked **75-package** requirements, with **no Torch installed**. The interface loaded, real speech synthesis completed, and dependency checks passed. |
+| Focused tests | **11 passed** in the clean environment: audio decode/selection; silence, corrupt data and reference limits; long-text preservation and limits; last speech token preservation; process-tree cancellation; storage deletion boundaries; first and repeated upload handling. |
+| Static/setup checks | Ruff correctness checks pass. PowerShell setup parses and bundled FFmpeg asset validation succeeds. No application builds were run. |
 
-No project builds were run. The app runs directly with Python.
+## Reproduce
 
-## Limits of these checks
+```powershell
+.venv/Scripts/python.exe -m pytest -q
+.venv/Scripts/python.exe scripts/download_models.py
+.venv/Scripts/python.exe scripts/smoke.py --reference path/to/speech.wav --repeat 2
+.venv/Scripts/python.exe app.py --no-browser --port 7861
+.venv/Scripts/python.exe scripts/ui_smoke.py --port 7861 --reference path/to/speech.wav --long-text
+.venv/Scripts/python.exe scripts/microphone_smoke.py
+```
 
-- Singing tests used upstream example audio. Human assessment of similarity to a particular singer and quality on the user's own microphone recordings remains necessary.
-- Link import was verified with a public direct WAV URL. YouTube and other streaming services can impose login/download restrictions or change their extractors; the app provides an upload fallback.
-- Vocal separation used an upstream vocal example. Dense accompaniment, multiple singers, and instrumental-only material can affect automatic reference selection.
-- Instrument inference was checked with a controlled melody and a simulated microphone. Actual imitations and noisy recordings will vary in note accuracy.
-- Desktop and mobile screenshots are saved locally under `data/smoke/`.
+The optional browser scripts need Playwright installed under `.tools/browser` using the app's Python version and an installed Chrome browser. The microphone check additionally uses `data/smoke/dave.wav` as its simulated capture source. Local reports/audio are intentionally ignored by Git.
+
+## Practical limits
+
+- This is English voice cloning. No engine can guarantee an exact, indistinguishable copy for every reference. The reference's tone, accent, speaking style, noise, and recording quality affect the result. Personal-recording listening assessment remains necessary for subjective similarity.
+- Speed varies with text, voice, background apps, and available RAM. The browser tests used approximately 0.84-1.23 GB peak worker RSS; this excludes browser/interface memory and does not measure total committed memory. This PC does not generate speech in real time.
+- The 5,000-character input limit and chunk preservation are covered by focused tests. The actual long-form browser run covers two passages, not every possible 5,000-character passage or pronunciation.
+- Gradio 5.49.1 has a duplicate-upload race on Windows: its background move can truncate an identical cached file while the browser reads it. `studio/uploads.py` reuses the existing content-addressed upload instead. Both a real repeated-upload browser retest and focused file-read checks pass. The compatibility fix is scoped to that pinned Gradio version.

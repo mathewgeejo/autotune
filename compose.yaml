@@ -1,0 +1,21 @@
+services:
+  voice-studio:
+    build: .
+    ports:
+      - "${VOICE_STUDIO_BIND:-127.0.0.1}:7860:7860"
+    environment:
+      VOICE_STUDIO_THREADS: "${VOICE_STUDIO_THREADS:-2}"
+      VOICE_STUDIO_USERNAME: "${VOICE_STUDIO_USERNAME:-}"
+      VOICE_STUDIO_PASSWORD: "${VOICE_STUDIO_PASSWORD:-}"
+    volumes:
+      - voice-studio-data:/data
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 128
+    stop_grace_period: 15s
+
+volumes:
+  voice-studio-data:

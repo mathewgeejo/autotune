@@ -25,10 +25,13 @@ def test_cancel_kills_children_and_allows_next_task(tmp_path, monkeypatch):
     monkeypatch.setattr(jobs.subprocess, 'Popen', lambda args, **kwargs:
                         popen([sys.executable, '-c', code], **kwargs) if '-m' in args else popen(args, **kwargs))
     manager = jobs.JobManager()
-    first = manager.submit('instrument', {})
+    sample = tmp_path / 'sample.wav'
+    sample.write_bytes(b'owned sample')
+    payload = {'source': str(sample), 'text': 'This is a cancellation test.'}
+    first = manager.submit('clone', payload)
     try:
         with pytest.raises(jobs.BusyError):
-            manager.submit('singer', {})
+            manager.submit('clone', payload)
         deadline = time.monotonic() + 10
         while not child_pid_file.exists() and time.monotonic() < deadline:
             time.sleep(0.1)
@@ -40,10 +43,10 @@ def test_cancel_kills_children_and_allows_next_task(tmp_path, monkeypatch):
             time.sleep(0.1)
         assert manager.snapshot(first)['state'] == 'cancelled'
         assert not psutil.pid_exists(child)
-        second = manager.submit('instrument', {})
+        second = manager.submit('clone', payload)
         assert second != first
     finally:
-        manager.cancel()
+        manager.close()
 
 
 def test_storage_cleanup_preserves_models_and_rejects_outside_paths(tmp_path, monkeypatch):

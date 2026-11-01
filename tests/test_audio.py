@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 import soundfile as sf
 
-from studio.audio import AudioError, best_reference, trim_source, validate_signal
+from studio.audio import AudioError, best_reference, decode, validate_signal
 
 
 def tone(path, seconds, rate=16000):
@@ -11,14 +11,11 @@ def tone(path, seconds, rate=16000):
     return path
 
 
-def test_trim_preserves_selected_duration_and_rejects_long_recordings(tmp_path):
+def test_decoder_preserves_selected_duration(tmp_path):
     source = tone(tmp_path/'long.wav', 32)
-    with pytest.raises(AudioError, match='exceeds 30'):
-        trim_source(source, tmp_path/'bad.wav')
-    result = trim_source(source, tmp_path/'clip.wav', 4, 9)
+    result = decode(source, tmp_path/'clip.wav', start=4, duration=5, rate=24000)
     assert sf.info(result).duration == pytest.approx(5, abs=0.02)
-    with pytest.raises(AudioError, match='end time'):
-        trim_source(source, tmp_path/'bad.wav', 8, 3)
+    assert sf.info(result).samplerate == 24000
 
 
 def test_silence_and_corrupt_audio_have_useful_errors(tmp_path):
@@ -29,7 +26,7 @@ def test_silence_and_corrupt_audio_have_useful_errors(tmp_path):
     bad = tmp_path/'broken.mp3'
     bad.write_bytes(b'not audio')
     with pytest.raises(AudioError, match='Could not read'):
-        trim_source(bad, tmp_path/'bad.wav')
+        decode(bad, tmp_path/'bad.wav')
 
 
 def test_reference_picker_avoids_silent_intro(tmp_path):
@@ -41,8 +38,3 @@ def test_reference_picker_avoids_silent_intro(tmp_path):
     assert start >= 8
     assert length == 5
     assert total == 20
-
-
-def test_trim_rejects_nan(tmp_path):
-    with pytest.raises(AudioError, match='positive'):
-        trim_source('unused', tmp_path/'out.wav', float('nan'), 0)

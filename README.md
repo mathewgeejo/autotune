@@ -1,51 +1,46 @@
 # Voice Studio
 
-A local Windows audio studio: sing in a reference voice, or turn humming into piano, guitar, violin, and synth. No AI API key or paid service is required.
+Local voice cloning on Windows: **give it a voice sample, type new text, and generate speech in that voice**. No performance recording, song link, transcript, paid API, or GPU is required.
 
 ## Start
 
-1. Run **setup.cmd** once. It installs an isolated Python 3.10 environment, CPU audio packages, FFmpeg, FluidSynth, and a General MIDI soundfont inside this project.
-2. Run **launch.cmd**. The interface opens at **http://127.0.0.1:7860**.
-3. Record or upload up to 30 seconds of solo singing/humming. For longer files, enter a start and end time.
+1. Run **setup.cmd** once, or rerun it to update an existing installation.
+2. Run **launch.cmd**. The app opens at **http://127.0.0.1:7860**.
+3. Record or upload **5-15 seconds of clean speech** from one speaker.
+4. Type the words in **Text to speak (English)** and click **Generate speech**.
+5. Play the result or download the 24 kHz WAV. Edit the text and generate again using the same sample.
 
-**Instrument:** choose a sound and click **Transform my voice**. Play or download the WAV, or export MIDI for editing in a music app. Sustained humming with clear note changes works best. Octave shift moves the melody; higher sensitivity picks up quieter notes but may introduce extra notes.
+Use a sample with the tone and accent you want to reproduce. Music, other speakers, distortion, and room echo reduce similarity. The model approximates voice identity; it cannot guarantee an indistinguishable copy of every voice. This engine generates English speech.
 
-**Singer:** paste a song URL or upload a downloaded song, then click **Prepare song reference**. The app separates vocals, selects a reference section, and previews it. You can adjust the section. Record your singing and click **Transform my voice**. This changes vocal tone while retaining your lyrics, melody, and timing; it does not make you perform the reference song automatically. Similarity varies with recording quality and the model.
+Longer samples can be trimmed with the start/end controls (up to 60 seconds per selection); the app chooses the strongest continuous ten-second section. Text supports up to 5,000 characters. Long text is split at sentence or word boundaries, synthesized in order, and joined into one WAV. A passage preview appears while the remaining text finishes.
 
-Song links use yt-dlp. Site changes, login restrictions, and protected streams can prevent imports; upload the audio file in that case. References must be under 10 minutes and 150 MB. Multiple singers and heavy effects can reduce reference quality.
+## Speed and local storage
 
-## Local processing and storage
+The speech pipeline uses quantized **Chatterbox Turbo ONNX** models, two CPU threads, a persistent worker, and cached speaker conditioning. The first generation downloads approximately **0.9 GB** of model files and loads the sessions. Later requests reuse the sessions and cached voice. Cancellation stops the worker and its child processes; the next request loads a fresh worker. Use **Release model from memory** when you want to free its RAM without closing the interface.
 
-First use of vocal separation and singer conversion downloads public model weights (several GB). After the weights are cached, file-based processing works offline. URL import always needs internet. The interface uses system fonts and disables Gradio analytics. It listens only on localhost and does not create a public sharing link.
+After models are downloaded, speech generation works offline. To download ahead of time:
 
-This PC has an Intel i3 CPU and around 8 GB RAM. Processing happens after recording, one job at a time. Singing conversion can take several minutes or longer. The activity panel reports elapsed time and peak worker memory. Cancel stops the worker and its child processes, freeing loaded models. Preview quality uses 10 diffusion steps, Standard 20, and Detailed 30.
+```powershell
+.venv/Scripts/python.exe scripts/download_models.py
+```
 
-Measured here: a 5-second singer preview required about **3 minutes 12 seconds of inference**, excluding model loading and downloads. A warm instrument conversion took about **14 seconds**. Start with short clips. See [VERIFICATION.md](VERIFICATION.md) for the checks and their limits.
+All processing runs on this PC. The app listens on localhost and does not create a public sharing link. Audio samples are never sent to a speech service. Downloads contact Hugging Face only for model files.
 
-All audio is stored under `data/`: `jobs/` holds recordings, results and logs, `references/` holds extracted vocal stems, and `tmp/` holds interface audio. The Local storage controls delete recordings/exports or cached references. Model weights remain in `data/models/` and `vendor/seed-vc/checkpoints/` for reuse. Setup assets live in `vendor/`; the Python runtime and installer cache live in `.tools/`.
+`data/jobs/` contains owned sample copies, the selected reference, generated speech, passage previews, logs, and timing reports. `data/references/` contains cached speaker conditioning. `data/models/` holds reusable model weights. Gradio temporary audio lives in `data/tmp/`. The local-storage controls delete recordings/exports or cached voice data while preserving models. Existing singing/instrument models from an older installation are left on disk but are no longer loaded or downloaded by this app.
 
-## Development and focused checks
+## Development and checks
 
 ```powershell
 .venv/Scripts/python.exe -m pytest -q
-.venv/Scripts/python.exe scripts/smoke.py instrument
-.venv/Scripts/python.exe scripts/smoke.py singer
-.venv/Scripts/python.exe scripts/smoke.py prepare
-.venv/Scripts/python.exe scripts/smoke.py link
-.venv/Scripts/python.exe scripts/download_models.py
-.venv/Scripts/python.exe app.py --no-browser
+.venv/Scripts/python.exe scripts/smoke.py --reference path/to/voice.wav --repeat 2
+.venv/Scripts/python.exe app.py --no-browser --port 7861
+.venv/Scripts/python.exe scripts/ui_smoke.py --port 7861 --reference path/to/voice.wav
 ```
 
-Smoke checks run actual model inference and save timing/memory reports alongside their job logs. Singer checks use upstream example clips and do not assess similarity to your own recordings. No frontend build is needed. Do not run routine builds after edits.
+Browser checks use installed Chrome and an optional Playwright install under `.tools/browser` (install using the same Python version as the app). `scripts/microphone_smoke.py` uses a simulated microphone with `data/smoke/dave.wav`; it never accesses the physical microphone. See [VERIFICATION.md](VERIFICATION.md) for measured results and limits. No frontend build is needed; the application runs directly with Python.
 
-`download_models.py` optionally caches all models ahead of time for offline use. Setup uses `requirements.lock.txt` to reproduce the installed package versions; direct dependencies are listed in `requirements.txt`.
+Setup uses `requirements.lock.txt`; direct dependencies are in `requirements.txt`. The runtime no longer installs Torch, singing conversion, source separation, MIDI transcription, or instrument rendering.
 
-## Engines and licenses
+## Engine provenance
 
-- [Seed-VC](https://github.com/Plachtaa/seed-vc), GPL-3.0, pinned to `51383efd921027683c89e5348211d93ff12ac2a8`. Setup patches Whisper's forced fp16 dtype to float32 for CPU use and reduces the inference cache to 4096 frames (sufficient for its 30-second context). Inference uses the upstream singing pipeline with pitch and timing preserved.
-- [Demucs](https://github.com/facebookresearch/demucs), MIT, for vocal separation.
-- [Basic Pitch](https://github.com/spotify/basic-pitch), Apache-2.0, using ONNX on CPU for audio-to-MIDI.
-- [FluidSynth](https://github.com/FluidSynth/fluidsynth), LGPL-2.1, and [GeneralUser GS](https://github.com/mrbumpy409/GeneralUser-GS), with its soundfont license downloaded by setup.
-- [yt-dlp](https://github.com/yt-dlp/yt-dlp) for song imports, and [imageio-ffmpeg](https://github.com/imageio/imageio-ffmpeg) for bundled FFmpeg.
-
-Upstream code and licenses are preserved in the downloaded assets. Check the applicable engine, model-weight, and soundfont licenses before redistributing a packaged app.
+The [Chatterbox Turbo ONNX models](https://huggingface.co/ResembleAI/chatterbox-turbo-ONNX) are published by Resemble AI under MIT. This app pins revision `d21799bd0354adb85e348b8a0442a8405110a2cf`, uses the publisher's 4-bit language model and 8-bit encoder/embedding/decoder graphs, and follows its reference-conditioned inference procedure. ONNX Runtime, Hugging Face Hub, Tokenizers, Gradio, and bundled FFmpeg retain their own upstream licenses. Preserve applicable licenses when redistributing the app or models.
