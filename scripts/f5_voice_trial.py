@@ -1,4 +1,4 @@
-"""Isolated full-precision Dhee-Indic-F5 trial using the fixed baseline reference.
+"""Isolated full-precision IndicF5-family trial using the fixed baseline reference.
 
 Run with .tools/f5-runtime/Scripts/python.exe after the verified download. This
 does not import Torch into the app or change its production voice engine.
@@ -54,6 +54,19 @@ def inference_modules(source):
             'original_modules_sha256': hashlib.sha256(original.encode('utf-8')).hexdigest()}
 
 
+def checkpoint_state(archive, prefix):
+    state = {}
+    for raw_key in archive.keys():
+        # torch.compile adds this wrapper namespace to the original checkpoint.
+        key = raw_key.replace('._orig_mod.', '.')
+        if key.startswith(prefix):
+            name = key.removeprefix(prefix)
+            if name in state:
+                raise ValueError('Checkpoint normalization produced duplicate parameter names')
+            state[name] = archive.get_tensor(raw_key)
+    return state
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--baseline-report', type=Path, required=True)
@@ -61,14 +74,17 @@ def main():
     parser.add_argument('--steps', type=int, choices=[16, 32], default=32)
     parser.add_argument('--guidance', type=float, default=2.0)
     parser.add_argument('--speed', type=float, default=1.0)
+    parser.add_argument('--model', choices=['dhee', 'original'], default='dhee')
     args = parser.parse_args()
     if args.output.exists():
         parser.error('Use a fresh report path to preserve prior trials.')
     if not 0.25 <= args.speed <= 4 or not 0 <= args.guidance <= 5:
         parser.error('Unsupported trial speed or guidance.')
     baseline = json.loads(args.baseline_report.read_text(encoding='utf-8'))
+    model_id = 'dheeyantra/dhee-indic-f5' if args.model == 'dhee' else 'Anjan9320/IndicF5'
+    model_revision = MODEL_REVISION if args.model == 'dhee' else VOCAB_REVISION
     source = ROOT/'.tools/indic-f5-source'
-    checkpoint = MODELS/'experimental-f5'/MODEL_REVISION/'model.safetensors'
+    checkpoint = MODELS/'experimental-f5'/model_revision/'model.safetensors'
     download = json.loads(checkpoint.with_name('download.json').read_text(encoding='utf-8'))
     if download['status'] != 'verified' or not checkpoint.is_file():
         raise RuntimeError('Wait for the checkpoint download and full SHA256 verification.')
@@ -80,7 +96,7 @@ def main():
     report = {'status': 'running', 'baseline_report': str(args.baseline_report),
               'source_reference': baseline['source_reference'], 'expected': baseline['expected'],
               'reference_text': baseline['result']['reference_text'], 'language': baseline['language'],
-              'model': 'dheeyantra/dhee-indic-f5', 'model_revision': MODEL_REVISION,
+              'model': model_id, 'model_revision': model_revision,
               'source_revision': SOURCE_REVISION, 'checkpoint_sha256': download['sha256'],
               'vocab_source': 'Anjan9320/IndicF5', 'vocab_revision': VOCAB_REVISION,
               'vocab_sha256': hashlib.sha256(vocab_path.read_bytes()).hexdigest(),
@@ -122,8 +138,7 @@ def main():
                 transformer = DiT(dim=1024, depth=22, heads=16, ff_mult=2, text_dim=512,
                                   conv_layers=4, text_num_embeds=vocab_size, mel_dim=100)
             with safe_open(str(checkpoint), framework='pt', device='cpu') as archive:
-                state = {key.removeprefix('ema_model.transformer.'): archive.get_tensor(key)
-                         for key in archive.keys() if key.startswith('ema_model.transformer.')}
+                state = checkpoint_state(archive, 'ema_model.transformer.')
             transformer.load_state_dict(state, strict=True, assign=True)
             del state
             transformer.text_embed.freqs_cis = precompute_freqs_cis(512, transformer.text_embed.precompute_max_pos)
@@ -185,8 +200,7 @@ def main():
                 hop_length=256, n_mels=100), backbone=VocosBackbone(input_channels=100, dim=512,
                 intermediate_dim=1536, num_layers=8), head=ISTFTHead(dim=512, n_fft=1024, hop_length=256, padding='same'))
             with safe_open(str(checkpoint), framework='pt', device='cpu') as archive:
-                state = {key.removeprefix('vocoder.'): archive.get_tensor(key)
-                         for key in archive.keys() if key.startswith('vocoder.')}
+                state = checkpoint_state(archive, 'vocoder.')
             vocoder.load_state_dict(state, strict=True)
             vocoder.eval()
             started = active_time()
@@ -201,7 +215,7 @@ def main():
             destination = folder/'speech.wav'
             sf.write(destination, waveform, 24000, subtype='PCM_16')
             report.update(status='generated', result={'audio': str(destination), 'reference_preview': str(reference),
-                          'duration': len(waveform)/24000, 'model': report['model'], 'model_revision': MODEL_REVISION,
+                          'duration': len(waveform)/24000, 'model': report['model'], 'model_revision': model_revision,
                           'reference_text': report['reference_text'], 'precision': report['precision'],
                           'synthesis_seconds': report['flow_seconds']+report['vocoder_seconds']})
             save()

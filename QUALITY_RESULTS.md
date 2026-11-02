@@ -134,3 +134,11 @@ Malayalam group 00269 reconstruction: speaker cosine **0.9694**, duration 4.880/
 A blind, level-matched listening pack for both same-text cases is prepared at `data/quality/listening-pairs-20261102/index.html`. Four audio clips load, all eight rating fields are present, and the 390-pixel viewport has no horizontal overflow or page errors. Source labels are kept in a separate answer key. **No human listening ratings have been entered**; preparation/browser checks are not perceptual results.
 
 Initial Jo autoregression timing is 6.144 seconds (2 threads), 4.717 (4), and 6.736 (1), with exact equality of every real-decoder input across all runs. Production autoregression remains on two threads pending reverse-order and broader input checks. Evidence: `data/quality/en-jo-language-threads.json`. A 64-step FP32 control on the difficult Malayalam sentence is next; 32-step quality defaults remain unchanged.
+
+## Follow-up controls
+
+The 64-step Malayalam run completes in **159.3 seconds**, with speaker cosine **0.9758**, word error **0.50**, and grapheme error **0.091**. The recognized text is unchanged from the 32-step Intel candidate. Doubling steps does not fix this sentence, so 32 remains the default. Evidence: `data/quality/ml-longer-steps64.json`.
+
+Dave autoregression timing reverses the first Jo result: four threads average **7.652 seconds**, versus **6.770** with two, with exact decoder-input equality. These mixed per-voice timings do not support changing the language-model default. The separate, validated waveform-decoder optimization stays enabled. Evidence: `data/quality/en-dave-language-threads.json`.
+
+The public original IndicF5 checkpoint at `Anjan9320/IndicF5@2b922175f2b4727b2415ed5cf636cd5ed2a2f8a9` is being downloaded for comparison with the fine-tuned Dhee checkpoint. Its 447 tensor shapes match after removing the original `torch.compile` wrapper namespace. The downloader pins its 1,402,789,408-byte size and SHA256 `ba7f3671180fb7784e24bd1dafc96e729a38ce02e7f6d3877cdef32525a1865c`; strict weight loading and real synthesis remain unproven until the download/trial completes. Higher-guidance DhVaani cases are also being measured. No candidate quality change is adopted from metadata inspection alone.

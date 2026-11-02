@@ -1,5 +1,6 @@
 """Resumable, bounded public-checkpoint download for the isolated F5 experiment."""
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import argparse
 import hashlib
 import json
 from pathlib import Path
@@ -41,6 +42,17 @@ def fetch(index):
 
 
 def main():
+    global REVISION, URL, SIZE, SHA256
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--model', choices=['dhee', 'original'], default='dhee')
+    args = parser.parse_args()
+    model_id = 'dheeyantra/dhee-indic-f5'
+    if args.model == 'original':
+        model_id = 'Anjan9320/IndicF5'
+        REVISION = '2b922175f2b4727b2415ed5cf636cd5ed2a2f8a9'
+        URL = f'https://huggingface.co/{model_id}/resolve/{REVISION}/model.safetensors'
+        SIZE = 1402789408
+        SHA256 = 'ba7f3671180fb7784e24bd1dafc96e729a38ce02e7f6d3877cdef32525a1865c'
     folder = MODELS/'experimental-f5'/REVISION
     folder.mkdir(parents=True, exist_ok=True)
     destination = (folder/'model.safetensors').resolve()
@@ -50,7 +62,7 @@ def main():
         raise RuntimeError('The model output must stay inside the configured model directory')
     if destination.exists():
         raise RuntimeError('The completed checkpoint already exists; preserve the prior result')
-    state = {'model': 'dheeyantra/dhee-indic-f5', 'revision': REVISION, 'source': URL,
+    state = {'model': model_id, 'revision': REVISION, 'source': URL,
              'expected_bytes': SIZE, 'expected_sha256': SHA256, 'chunk_bytes': CHUNK,
              'completed': {}, 'status': 'downloading'}
     if manifest.exists():
@@ -71,7 +83,7 @@ def main():
             if hashlib.sha256(body).hexdigest() != digest:
                 del state['completed'][key]
         probe = ROOT/'.tools/dhee-range-probe.bin'
-        if '0' not in state['completed'] and probe.is_file() and probe.stat().st_size == CHUNK:
+        if args.model == 'dhee' and '0' not in state['completed'] and probe.is_file() and probe.stat().st_size == CHUNK:
             body = probe.read_bytes()
             output.seek(0)
             output.write(body)
