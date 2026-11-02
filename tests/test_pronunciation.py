@@ -1,4 +1,5 @@
 from pathlib import Path
+import weakref
 
 import pytest
 
@@ -64,3 +65,41 @@ def test_retry_requires_word_gain_and_retains_actual_selected_metadata(tmp_path,
     assert result['precision']['guidance_scale'] == (3 if selected == 'retry' else 2)
     assert Path(result['audio']).parent == (tmp_path/'pronunciation-retry' if selected == 'retry' else tmp_path)
     assert result['word_check']['render_synthesis_seconds'] == 170
+
+
+@pytest.mark.parametrize('failure_stage', ['render', 'retry-check'])
+def test_failed_retry_keeps_the_default_and_releases_its_engine(tmp_path, monkeypatch, failure_stage):
+    original = audit(.5, .09, .975)
+    monkeypatch.setattr(recognition, 'recognize', lambda *args: original['transcription'])
+    monkeypatch.setattr(recognition, 'content_comparison', lambda *args: original['content_comparison'])
+    monkeypatch.setattr(recognition, 'speaker_similarity', lambda *args: original['speaker_verification'])
+    refs = []
+    class Engine:
+        def __init__(self, *args):
+            self.precision = {}
+            refs.append(weakref.ref(self))
+        def synthesize(self, request, folder, progress, prepared=None):
+            if failure_stage == 'render':
+                raise MemoryError('Simulated retry memory failure')
+            return {'audio': str(folder/'speech.wav'), 'synthesis_seconds': 90}
+    def failed_check(*args):
+        assert refs[0]() is None, 'The retry model must be released before its checker loads'
+        raise OSError('Simulated checker failure')
+    monkeypatch.setattr(indic, 'IndicEngine', Engine)
+    monkeypatch.setattr(recognition, 'full_audit', failed_check)
+    default = baseline(tmp_path)
+    result = check_pronunciation({'text': 'expected'}, tmp_path, None, default, lambda message: None, lambda report: None)
+    assert result['audio'] == default['audio']
+    assert result['word_check']['status'] == 'check-unavailable'
+    assert result['word_check']['retry_attempted']
+    assert refs[0]() is None
+
+
+def test_separate_report_write_failure_keeps_audio_and_embedded_check(tmp_path, monkeypatch):
+    monkeypatch.setattr(recognition, 'recognize', lambda *args: {'text': 'expected'})
+    monkeypatch.setattr(recognition, 'content_comparison', lambda *args: audit(0, 0, .9)['content_comparison'])
+    def failed_write(report):
+        raise PermissionError('Report temporarily locked')
+    result = check_pronunciation({'text': 'expected'}, tmp_path, None, baseline(tmp_path), lambda message: None, failed_write)
+    assert result['audio'] == baseline(tmp_path)['audio']
+    assert result['word_check']['status'] == 'word-check-passed'

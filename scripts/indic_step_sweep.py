@@ -17,7 +17,7 @@ from studio.paths import configure
 configure()
 from studio.indic import IndicEngine
 from studio.recognition import full_audit
-from studio.runtime import keep_awake
+from studio.runtime import keep_awake, active_time
 from studio.speech import prepare_sample
 
 
@@ -49,6 +49,29 @@ def reference_fixed_text_conditioning(self, text, prompt_tokens, prompt_length):
     return condition
 
 
+class WarmShapeFlow:
+    """Experimental repeated first-step evaluation; only the last value advances the solver."""
+    def __init__(self, flow, evaluations):
+        self.flow, self.evaluations, self.shapes = flow, evaluations, set()
+        self.warmup_seconds = 0
+
+    @property
+    def backend(self):
+        return getattr(self.flow, 'backend', 'onnxruntime-cpu')
+
+    def run(self, output_names, feeds):
+        shape = tuple(feeds['x'].shape)
+        if shape not in self.shapes and self.backend.startswith('openvino'):
+            started = active_time()
+            for _ in range(self.evaluations-1):
+                self.flow.run(output_names, feeds)
+                if not self.backend.startswith('openvino'):
+                    break
+            self.warmup_seconds += active_time()-started
+            self.shapes.add(shape)
+        return self.flow.run(output_names, feeds)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--baseline-report', type=Path, required=True)
@@ -58,6 +81,8 @@ def main():
     parser.add_argument('--accelerator', choices=['cpu', 'intel'], default='cpu')
     parser.add_argument('--timing-mode', choices=['production', 'legacy', 'reference-fixed'], default='production',
                         help='Production uses graph duration control; reference-fixed retains the rejected target-frame experiment.')
+    parser.add_argument('--gpu-warmup-evaluations', type=int, choices=[0, 3], default=0,
+                        help='Experimental cold-shape stabilization; no production backend change.')
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
     if args.output.exists():
@@ -79,6 +104,7 @@ def main():
               'comparison': 'Fixed reference, text, FP32 weights and seed 666; record steps, guidance, speed and actual backend for each trial.',
               'requested_accelerator': args.accelerator,
               'timing_mode': args.timing_mode,
+              'gpu_warmup_evaluations': args.gpu_warmup_evaluations,
               'timing_algorithm': 'target-frame-nearest' if args.timing_mode == 'reference-fixed' else 'graph-target-duration',
               'git_revision': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip(),
               'baseline_precision': baseline['result']['precision'],
@@ -90,6 +116,9 @@ def main():
     progress = lambda message, **kwargs: print(message, flush=True)
     with keep_awake():
         engine = IndicEngine(progress, 'Detailed')
+        if args.gpu_warmup_evaluations:
+            engine.flow_decoder = WarmShapeFlow(engine.flow_decoder, args.gpu_warmup_evaluations)
+            engine.precision['gpu_shape_warmup_evaluations'] = args.gpu_warmup_evaluations
         if args.timing_mode == 'legacy':
             engine.text_conditioning = MethodType(legacy_text_conditioning, engine)
         elif args.timing_mode == 'reference-fixed':
