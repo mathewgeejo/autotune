@@ -10,6 +10,7 @@ import soundfile as sf
 from studio.audio import decode, reference_activity
 from studio.models import (download_asr, download_speaker, ASR_ID, ASR_REVISION, SPEAKER_ID,
                            SPEAKER_REVISION, MALAYALAM_ASR_ID, MALAYALAM_ASR_REVISION)
+from studio.runtime import active_time
 
 
 def transcript_script_check(text, language):
@@ -71,15 +72,20 @@ def verifier_input(audio, rate=16000):
 
 
 def recognize(path, folder, language=None, progress=lambda message: None, fallback_language=None):
+    started = active_time()
     from faster_whisper import WhisperModel
     from studio.paths import MODELS
     root = download_asr(progress, language)
-    progress('Recognizing the spoken words on CPU')
+    progress('Loading the speech recognizer on CPU')
+    load_started = active_time()
     model = WhisperModel(root, device='cpu', compute_type='int8', cpu_threads=2, num_workers=1,
                          download_root=str(MODELS), local_files_only=True)
+    loaded = active_time()
     audio_path = decode(path, Path(folder)/'recognition-input.wav', rate=16000, duration=60.1)
     audio, _ = sf.read(audio_path, dtype='float32')
     audio, level = evaluation_level(audio)
+    progress('Recognizing the spoken words on CPU')
+    recognition_started = active_time()
     # No expected text is passed as an initial prompt: doing so would bias the
     # recognizer toward the answer and invalidate a pronunciation/content test.
     segments, info = model.transcribe(audio, language=language or None, beam_size=5,
@@ -110,10 +116,14 @@ def recognize(path, folder, language=None, progress=lambda message: None, fallba
               'revision': MALAYALAM_ASR_REVISION if language == 'ml' else ASR_REVISION,
               'decoding': {'beam_size': 5, 'temperature': 0.0, 'vad_filter': True,
                            'condition_on_previous_text': False, 'hallucination_silence_threshold': 1.0},
-              'input_preprocessing': level}
+              'input_preprocessing': level,
+              'timings': {'model_load_seconds': loaded-load_started,
+                          'audio_preparation_seconds': recognition_started-loaded,
+                          'recognition_seconds': active_time()-recognition_started}}
     del model
     gc.collect()
     result['script_check'] = transcript_script_check(result['text'], language or info.language)
+    result['timings']['total_seconds'] = active_time()-started
     return result
 
 
