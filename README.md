@@ -12,7 +12,7 @@ Self-hosted voice cloning and audio diagnostics for **English, Hindi, and Malaya
 4. Type the words in **Text to speak**, choose Auto or the language, and click **Generate speech**. Use native Hindi or Malayalam script for those languages.
 5. Play the result or download the 24 kHz WAV. Edit the text and generate again using the same sample.
 
-Use a sample with the tone and accent you want to reproduce. Music, other speakers, distortion, and room echo reduce similarity. English uses Chatterbox Turbo ONNX. Hindi and Malayalam use a separate public DhVaani ONNX export. Detailed uses full precision and 32 refinement steps; Balanced uses smaller INT8 graphs and 16 steps. Indic generation can take several minutes for a short sentence on a two-core laptop.
+Use a sample with the tone and accent you want to reproduce. Music, other speakers, distortion, and room echo reduce similarity. English uses Chatterbox Turbo ONNX. Hindi and Malayalam use a separate public DhVaani ONNX export. Detailed uses full precision, 32 refinement steps, and stronger voice guidance; Balanced uses smaller INT8 graphs and 16 steps. Indic generation can take several minutes for a short sentence on a two-core laptop.
 
 For Hindi/Malayalam, open **Selected reference and transcript** to inspect the selected audio and its words. Blank reference words trigger local recognition. A reference in the output language generally gives more reliable timing. A Malayalam-specific recognizer is used for Malayalam; recognition can still be wrong. The app rejects an incompatible transcript script instead of silently using it.
 
@@ -61,3 +61,5 @@ Setup uses `requirements.lock.txt`; direct dependencies are in `requirements.txt
 ## Engine provenance
 
 The [Chatterbox Turbo ONNX models](https://huggingface.co/ResembleAI/chatterbox-turbo-ONNX) are published by Resemble AI under MIT. This app pins revision `d21799bd0354adb85e348b8a0442a8405110a2cf`, uses the publisher's 4-bit language model and 8-bit encoder/embedding/decoder graphs, and follows its reference-conditioned inference procedure. ONNX Runtime, Hugging Face Hub, Tokenizers, Gradio, and bundled FFmpeg retain their own upstream licenses. Preserve applicable licenses when redistributing the app or models.
+
+See [THIRD_PARTY.md](THIRD_PARTY.md) for the DhVaani/Vocos Indic engine, independent speaker verifier, and multilingual/Malayalam recognizers. Model revisions and tokenizer assets are pinned in `studio/models.py`; the Indic ONNX export is a third-party conversion.

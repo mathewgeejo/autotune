@@ -289,9 +289,10 @@ def comparison_figure(profiles):
                           (3, profile['frequency_hz'], profile['mean_spectrum_db'])):
             figure.add_trace(go.Scatter(x=x, y=y, name=name, legendgroup=name,
                 showlegend=row == 1, line={'color': color, 'width': 1.5}, connectgaps=False), row=row, col=1)
-    figure.update_layout(height=690, template='plotly_dark', margin={'l': 45, 'r': 20, 't': 45, 'b': 25},
+    figure.update_annotations(font_size=13)
+    figure.update_layout(height=690, template='plotly_dark', margin={'l': 45, 'r': 20, 't': 70, 'b': 25},
                          paper_bgcolor='#151824', plot_bgcolor='#0f121d', hovermode='x unified',
-                         legend={'orientation': 'h', 'x': 0, 'y': 1.06})
+                         legend={'orientation': 'h', 'x': 0, 'y': 1.12, 'font': {'size': 11}})
     figure.update_yaxes(title_text='Hz', row=1, col=1)
     figure.update_yaxes(title_text='dBFS', row=2, col=1)
     figure.update_yaxes(title_text='dB power', row=3, col=1)

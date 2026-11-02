@@ -69,4 +69,4 @@ Only a verified existing free allocation with sufficient resources, a confirmed 
 
 ## Current verification limits
 
-This workstation has neither Docker nor WSL installed. The Dockerfile and Compose configuration are prepared, but a real Linux container run remains a required gate. Do not interpret a configuration parse as a successful image build or deployment. `WORK_PLAN.md` tracks the remaining quality and deployment gates.
+This workstation has neither a Docker engine nor WSL installed. The Dockerfile and Compose configuration are prepared, and the native Compose v2.39.4 parser validates the configuration. A real Linux container run remains a required gate. Do not interpret a configuration parse as a successful image build or deployment. `WORK_PLAN.md` tracks the remaining quality and deployment gates.

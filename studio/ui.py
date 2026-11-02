@@ -11,6 +11,7 @@ from studio.languages import LANGUAGES
 from studio.speech import split_text, prepare_sample
 from studio.style import CSS
 from studio.accessibility import CSS as A11Y_CSS, JS as A11Y_JS, diagnostic_table
+from studio.browser import HEAD as BROWSER_HEAD
 
 ACOUSTIC_HEADERS = ['Measurement', 'Reference', 'Generated', 'Difference', 'Unit']
 SEGMENT_HEADERS = ['Reference seconds', 'Output seconds', 'Spectral distance', 'Pitch difference (cents)']
@@ -195,7 +196,7 @@ def create_app():
         button_secondary_background_fill='#262b3e', button_secondary_background_fill_dark='#262b3e',
         button_secondary_text_color='#e5e6ef', button_secondary_text_color_dark='#e5e6ef')
     language_options = [('Auto detect', 'auto')]+[(label, code) for code, label in LANGUAGES.items()]
-    with gr.Blocks(title='Voice Studio | Clone, listen, compare', theme=theme, css=CSS, js=A11Y_JS,
+    with gr.Blocks(title='Voice Studio | Clone, listen, compare', theme=theme, css=CSS, js=A11Y_JS, head=BROWSER_HEAD,
                    analytics_enabled=False, delete_cache=(3600, 86400), fill_width=True) as demo:
         gr.HTML('''<div class="studio-header"><div class="brand">VOICE STUDIO</div>
         <h1>Give your words a familiar voice.</h1>
@@ -323,5 +324,6 @@ def create_app():
         def poll_ui(job, previous):
             updates = poll_updates(job, previous)
             return {outputs[key]: value for key, value in updates.items()} if updates else (gr.skip(),)*len(outputs)
-        gr.Timer(1).tick(poll_ui, [job_id, delivered], list(outputs.values()), queue=False, api_name=False)
+        gr.Timer(1).tick(poll_ui, [job_id, delivered], list(outputs.values()), queue=False,
+                         show_progress='hidden', api_name=False)
     return demo

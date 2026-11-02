@@ -18,10 +18,10 @@ def atomic_json(path, value):
     temporary.replace(path)
 
 
-def reference_transcript(preview, folder, language, progress):
+def reference_transcript(preview, folder, language, progress, target_language=None):
     from studio.models import ASR_REVISION, MALAYALAM_ASR_REVISION
     key = hashlib.sha256(preview.read_bytes()+ASR_REVISION.encode()+MALAYALAM_ASR_REVISION.encode()
-                         +str(language).encode()+b'level-script-v2').hexdigest()
+                         +str(language).encode()+str(target_language).encode()+b'level-script-v3').hexdigest()
     target = REFERENCES/'transcripts'/f'{key}.json'
     if target.is_file():
         data = json.loads(target.read_text(encoding='utf-8'))
@@ -29,7 +29,14 @@ def reference_transcript(preview, folder, language, progress):
             progress('Reusing the selected sample transcript')
             return data['text']
     from studio.recognition import recognize
-    result = recognize(preview, folder, language, progress)
+    result = recognize(preview, folder, language, progress, fallback_language=target_language)
+    if language is None and target_language == 'ml' and not result['script_check']['reliable']:
+        previous_language = result['language']
+        progress('Checking the ambiguous reference with native Malayalam recognition')
+        result = recognize(preview, folder, 'ml', progress)
+        result['automatic_fallback'] = {'previous_detected_language': previous_language,
+            'reason': 'The automatic transcript had an incompatible or unsupported script; output language is Malayalam.'}
+    atomic_json(folder/'reference-transcription.json', result)
     if not result['text'].strip():
         from studio.audio import AudioError
         raise AudioError('The sample could not be transcribed. Use clearer speech or enter its exact words.')
@@ -104,7 +111,7 @@ def run(request_path, engine=None):
                         if reference_language in ('auto', ''):
                             reference_language = None
                         request['reference_text'] = reference_transcript(prepared[1], folder,
-                                                                        reference_language, progress)
+                                                                        reference_language, progress, language)
                     if engine is None:
                         if language == 'en':
                             progress('Starting the English cloning engine')

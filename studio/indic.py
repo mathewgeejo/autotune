@@ -62,10 +62,11 @@ class IndicEngine(SpeechEngine):
         self.quality = quality
         self.steps = 32 if quality == 'Detailed' else 16
         self.speed = 1.0
-        self.guidance_scale = 1.0
+        self.guidance_scale = 2.0 if quality == 'Detailed' else 1.0
         suffix = '' if quality == 'Detailed' else '_int8'
         self.precision = {'text_encoder': 'fp32' if not suffix else 'int8',
-                          'flow_decoder': 'fp32' if not suffix else 'int8', 'steps': self.steps}
+                          'flow_decoder': 'fp32' if not suffix else 'int8', 'steps': self.steps,
+                          'guidance_scale': self.guidance_scale, 'speed': self.speed}
         root = download_indic_models(quality, progress)
         progress('Loading native-script text and voice models')
         self.text_encoder = session(root/f'text_encoder{suffix}.onnx')
@@ -132,13 +133,27 @@ class IndicEngine(SpeechEngine):
             temporary.replace(path)
         return (features.astype(np.float32), self.text_ids(self.reference_text), original_rms), reused
 
+    def text_conditioning(self, text, prompt_tokens, prompt_length):
+        feeds = {
+            'tokens': self.text_ids(text), 'prompt_tokens': prompt_tokens,
+            'prompt_features_len': np.array(prompt_length, dtype=np.int64),
+            'speed': np.array(1.0, dtype=np.float32)}
+        condition = self.text_encoder.run(None, feeds)[0].astype(np.float32)
+        if self.speed != 1.0:
+            if not 0.25 <= self.speed <= 4:
+                raise AudioError('Indic speaking rate must be between 0.25 and 4.')
+            # The exported speed scales the *entire* prompt+target duration.
+            # Keep the reference window fixed and scale only the new speech.
+            total = condition.shape[1]
+            desired = prompt_length+(total-prompt_length)/self.speed
+            feeds['speed'] = np.array(total/desired, dtype=np.float32)
+            condition = self.text_encoder.run(None, feeds)[0].astype(np.float32)
+        return condition
+
     def generate_chunk(self, text, voice, progress):
         features, prompt_tokens, original_rms = voice
         prompt_length = features.shape[1]
-        text_condition = self.text_encoder.run(None, {
-            'tokens': self.text_ids(text), 'prompt_tokens': prompt_tokens,
-            'prompt_features_len': np.array(prompt_length, dtype=np.int64),
-            'speed': np.array(self.speed, dtype=np.float32)})[0].astype(np.float32)
+        text_condition = self.text_conditioning(text, prompt_tokens, prompt_length)
         batch, length, dimension = text_condition.shape
         if length <= prompt_length or length > 3000:
             raise AudioError('The estimated passage length is invalid. Check the reference transcript or use shorter text.')

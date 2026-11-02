@@ -7,6 +7,7 @@ services:
       VOICE_STUDIO_THREADS: "${VOICE_STUDIO_THREADS:-2}"
       VOICE_STUDIO_USERNAME: "${VOICE_STUDIO_USERNAME:-}"
       VOICE_STUDIO_PASSWORD: "${VOICE_STUDIO_PASSWORD:-}"
+      VOICE_STUDIO_REQUIRE_AUTH: "${VOICE_STUDIO_REQUIRE_AUTH:-0}"
     volumes:
       - voice-studio-data:/data
     restart: unless-stopped

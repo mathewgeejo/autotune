@@ -21,7 +21,7 @@ def main():
     records = []
     trials = [('native-guidance-two', ROOT/'data/smoke/fleurs-ml_in/reference.wav',
                ROOT/'data/smoke/fleurs-ml_in/reference.txt', 1.0, 2.0),
-              ('cross-language-slower', ROOT/'data/smoke/dave.wav',
+              ('cross-language-corrected-rate', ROOT/'data/smoke/dave.wav',
                ROOT/'data/smoke/dave.txt', 0.45, 1.5)]
     with keep_awake():
         for name, reference, caption, speed, guidance in trials:

@@ -1,4 +1,6 @@
 """Actual browser comparison, chart rendering, exports, and device layouts."""
+import argparse
+import json
 from pathlib import Path
 import sys
 import time
@@ -10,6 +12,9 @@ from playwright.sync_api import sync_playwright
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--full-audit', action='store_true', help='Audit the actual offline Malayalam output with independent models.')
+    args = parser.parse_args()
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     deadline = time.monotonic()+120
     while True:
@@ -29,10 +34,19 @@ def main():
         page.goto('http://127.0.0.1:7861', wait_until='domcontentloaded', timeout=120000)
         page.get_by_role('tab', name='Voice analysis', exact=True).click()
         paths = [ROOT/'data/smoke/dave.wav', ROOT/'data/jobs/af007f3489894c92b19173af6f8285ec/speech.wav']
+        if args.full_audit:
+            report_path = ROOT/'data/smoke/automatic-indic-ml.json'
+            if not report_path.exists():
+                report_path = ROOT/'data/smoke/automatic-indic.json'
+            previous = json.loads(report_path.read_text(encoding='utf-8'))
+            paths = [Path(previous['result']['reference_preview']), Path(previous['result']['audio'])]
         for index, path in enumerate(paths):
             control = page.locator('#analysis-reference' if index == 0 else '#analysis-candidate')
             with page.expect_response(lambda response: '/upload' in response.url and response.request.method == 'POST', timeout=60000):
                 control.locator('input[type=file]').set_input_files(str(path))
+        if args.full_audit:
+            page.get_by_label('Expected spoken words', exact=True).fill(previous['result']['text'])
+            page.get_by_label('Full quality audit', exact=True).check()
         page.get_by_role('button', name='Analyze voices', exact=True).click()
         page.wait_for_function("() => /Starting|RUNNING/.test(document.querySelector('#status textarea').value)", timeout=30000)
         page.wait_for_function("() => /COMPLETE|FAILED/.test(document.querySelector('#status textarea').value)", timeout=180000)
@@ -43,6 +57,17 @@ def main():
         assert page.locator('a[href*="analysis.json"]').count() >= 1
         assert page.locator('a[href*="analysis-frames.csv"]').count() >= 1
         assert page.locator('a[href*="audio-diagnostics.zip"]').count() >= 1
+        href = page.locator('a[href*="analysis.json"]').first.evaluate('(element)=>element.href')
+        exported = page.request.get(href)
+        assert exported.ok
+        exported_report = exported.json()
+        assert exported_report['schema_version'] == 2
+        if args.full_audit:
+            assert exported_report['transcription']['language'] == 'ml'
+            assert exported_report['content_comparison']['available']
+            assert exported_report['speaker_verification']['available']
+            assert 'Independent speaker cosine' in page.locator('#analysis-summary').inner_text()
+            assert 'Recognized word errors' in page.locator('#analysis-summary').inner_text()
         page.locator('.js-plotly-plot').wait_for(timeout=60000)
         assert page.evaluate("document.querySelector('.js-plotly-plot').data.length") == 6
         for width in (1440, 768, 390, 360):
@@ -51,6 +76,8 @@ def main():
             # wait for the responsive layout rather than photographing a stale chart.
             try:
                 page.wait_for_function('document.documentElement.scrollWidth <= window.innerWidth + 2', timeout=10000)
+                page.wait_for_function("""() => {const plot=document.querySelector('.js-plotly-plot');
+                  return plot && plot._fullLayout.width <= plot.parentElement.clientWidth + 2;}""", timeout=10000)
             except Exception:
                 print(page.evaluate("""() => [...document.querySelectorAll('body *')].filter(e =>
                   e.offsetParent && e.getBoundingClientRect().right > innerWidth + 2).sort((a,b) => b.getBoundingClientRect().width-a.getBoundingClientRect().width).slice(-30).map(e =>
@@ -58,7 +85,8 @@ def main():
                     right:e.getBoundingClientRect().right}))"""), flush=True)
                 page.screenshot(path=str(ROOT/f'data/smoke/analysis-overflow-{width}.png'), full_page=True)
                 raise
-            page.screenshot(path=str(ROOT/f'data/smoke/analysis-{width}.png'), full_page=True)
+            prefix = 'analysis-full' if args.full_audit else 'analysis'
+            page.screenshot(path=str(ROOT/f'data/smoke/{prefix}-{width}.png'), full_page=True)
             assert page.evaluate('document.documentElement.scrollWidth <= window.innerWidth + 2'), f'Overflow at {width}px'
         assert not errors, errors
         browser.close()

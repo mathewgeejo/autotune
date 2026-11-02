@@ -18,8 +18,13 @@ def transcript_script_check(text, language):
     if not letters:
         return {'reliable': False, 'reason': 'No spoken words were recognized.'}
     ranges = {'ml': ('\u0d00', '\u0d7f'), 'hi': ('\u0900', '\u097f')}
+    if language == 'en':
+        fraction = sum('LATIN' in unicodedata.name(char, '') for char in letters)/len(letters)
+        return {'reliable': fraction >= 0.5, 'native_letter_fraction': fraction,
+                'reason': ('Recognized script matches English.' if fraction >= 0.5 else
+                           'The recognizer returned a different script. Review the audio and transcript.')}
     if language not in ranges:
-        return {'reliable': True, 'reason': 'No native-script constraint was applied.'}
+        return {'reliable': False, 'reason': 'The detected language is outside English, Hindi, and Malayalam. Select the spoken language explicitly.'}
     lower, upper = ranges[language]
     matching = sum(lower <= char <= upper for char in letters)
     fraction = matching/len(letters)
@@ -47,7 +52,7 @@ def evaluation_level(audio):
                         'original_rms': rms, 'gain_db': float(20*np.log10(max(gain, 1e-9)))}
 
 
-def recognize(path, folder, language=None, progress=lambda message: None):
+def recognize(path, folder, language=None, progress=lambda message: None, fallback_language=None):
     from faster_whisper import WhisperModel
     from studio.paths import MODELS
     root = download_asr(progress, language)
@@ -60,7 +65,19 @@ def recognize(path, folder, language=None, progress=lambda message: None):
     # No expected text is passed as an initial prompt: doing so would bias the
     # recognizer toward the answer and invalidate a pronunciation/content test.
     segments, info = model.transcribe(audio, language=language or None, beam_size=5,
-        vad_filter=True, word_timestamps=True, condition_on_previous_text=False)
+        temperature=0.0, vad_filter=True, word_timestamps=True,
+        condition_on_previous_text=False, hallucination_silence_threshold=1.0)
+    if language is None:
+        progress(f'Detected speech language: {info.language} ({info.language_probability:.0%})')
+    if language is None and (info.language == 'ml' or
+                             fallback_language == 'ml' and info.language not in ('en', 'hi')):
+        detection = {'language': info.language, 'probability': info.language_probability}
+        del segments, model
+        gc.collect()
+        progress('Using the native Malayalam recognizer to verify the detected language')
+        result = recognize(path, folder, 'ml', progress)
+        result['initial_language_detection'] = detection
+        return result
     collected = []
     for segment in segments:
         collected.append({'start': segment.start, 'end': segment.end, 'text': segment.text.strip(),
@@ -70,14 +87,14 @@ def recognize(path, folder, language=None, progress=lambda message: None):
         progress(f'Recognized through {segment.end:.1f} seconds')
     result = {'text': ' '.join(segment['text'] for segment in collected), 'segments': collected,
               'language': info.language, 'language_probability': info.language_probability,
+              'language_was_selected': language is not None,
               'model': MALAYALAM_ASR_ID if language == 'ml' else ASR_ID,
               'revision': MALAYALAM_ASR_REVISION if language == 'ml' else ASR_REVISION,
+              'decoding': {'beam_size': 5, 'temperature': 0.0, 'vad_filter': True,
+                           'condition_on_previous_text': False, 'hallucination_silence_threshold': 1.0},
               'input_preprocessing': level}
     del model
     gc.collect()
-    if language is None and info.language == 'ml':
-        progress('Using the native Malayalam recognizer to verify the detected language')
-        return recognize(path, folder, 'ml', progress)
     result['script_check'] = transcript_script_check(result['text'], language or info.language)
     return result
 
@@ -132,6 +149,12 @@ def speaker_similarity(reference, candidate, folder, progress=lambda message: No
 
 
 def full_audit(reference, output, expected, folder, language, progress):
+    if not language and expected.strip():
+        from studio.languages import resolve_language
+        # Script supplies a language hint, never expected words to the decoder.
+        inferred = resolve_language(expected, 'auto')
+        if inferred in ('ml', 'hi'):
+            language = inferred
     verifier = speaker_similarity(reference, output, folder, progress)
     # Speaker sessions are released on function exit before the ASR model loads.
     gc.collect()
