@@ -2,12 +2,39 @@
 import gc
 import json
 from pathlib import Path
+import unicodedata
 
 import numpy as np
 import soundfile as sf
 
 from studio.audio import decode
-from studio.models import download_asr, download_speaker, ASR_ID, ASR_REVISION, SPEAKER_ID, SPEAKER_REVISION
+from studio.models import (download_asr, download_speaker, ASR_ID, ASR_REVISION, SPEAKER_ID,
+                           SPEAKER_REVISION, MALAYALAM_ASR_ID, MALAYALAM_ASR_REVISION)
+
+
+def transcript_script_check(text, language):
+    """Reject an incompatible written script, without using the expected words."""
+    letters = [char for char in text if unicodedata.category(char).startswith('L')]
+    if not letters:
+        return {'reliable': False, 'reason': 'No spoken words were recognized.'}
+    ranges = {'ml': ('\u0d00', '\u0d7f'), 'hi': ('\u0900', '\u097f')}
+    if language not in ranges:
+        return {'reliable': True, 'reason': 'No native-script constraint was applied.'}
+    lower, upper = ranges[language]
+    matching = sum(lower <= char <= upper for char in letters)
+    fraction = matching/len(letters)
+    reliable = fraction >= 0.5
+    return {'reliable': reliable, 'native_letter_fraction': fraction,
+            'reason': ('Recognized script matches the selected language.' if reliable else
+                       'The recognizer returned a different script. Word-error scores are unavailable; review the audio and transcript.')}
+
+
+def content_comparison(expected, transcript):
+    from studio.analysis import transcript_errors
+    check = transcript.get('script_check', {'reliable': False, 'reason': 'Transcript script was not validated.'})
+    if not check['reliable']:
+        return {'available': False, 'reason': check['reason'], 'differences': []}
+    return transcript_errors(expected, transcript['text'])
 
 
 def evaluation_level(audio):
@@ -23,7 +50,7 @@ def evaluation_level(audio):
 def recognize(path, folder, language=None, progress=lambda message: None):
     from faster_whisper import WhisperModel
     from studio.paths import MODELS
-    root = download_asr(progress)
+    root = download_asr(progress, language)
     progress('Recognizing the spoken words on CPU')
     model = WhisperModel(root, device='cpu', compute_type='int8', cpu_threads=2, num_workers=1,
                          download_root=str(MODELS), local_files_only=True)
@@ -43,9 +70,15 @@ def recognize(path, folder, language=None, progress=lambda message: None):
         progress(f'Recognized through {segment.end:.1f} seconds')
     result = {'text': ' '.join(segment['text'] for segment in collected), 'segments': collected,
               'language': info.language, 'language_probability': info.language_probability,
-              'model': ASR_ID, 'revision': ASR_REVISION, 'input_preprocessing': level}
+              'model': MALAYALAM_ASR_ID if language == 'ml' else ASR_ID,
+              'revision': MALAYALAM_ASR_REVISION if language == 'ml' else ASR_REVISION,
+              'input_preprocessing': level}
     del model
     gc.collect()
+    if language is None and info.language == 'ml':
+        progress('Using the native Malayalam recognizer to verify the detected language')
+        return recognize(path, folder, 'ml', progress)
+    result['script_check'] = transcript_script_check(result['text'], language or info.language)
     return result
 
 
@@ -99,12 +132,11 @@ def speaker_similarity(reference, candidate, folder, progress=lambda message: No
 
 
 def full_audit(reference, output, expected, folder, language, progress):
-    from studio.analysis import transcript_errors
     verifier = speaker_similarity(reference, output, folder, progress)
     # Speaker sessions are released on function exit before the ASR model loads.
     gc.collect()
     transcript = recognize(output, folder, language, progress)
-    errors = transcript_errors(expected, transcript['text'])
+    errors = content_comparison(expected, transcript)
     if errors.get('available'):
         words = [word for segment in transcript['segments'] for word in segment['words']]
         for difference in errors['differences']:

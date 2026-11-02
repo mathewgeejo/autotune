@@ -62,3 +62,19 @@ def test_full_minute_is_accepted_and_over_limit_rejected():
     assert minute['metrics']['duration_seconds'] == 60
     with pytest.raises(AudioError, match='60 seconds'):
         acoustic_profile(voice_tone(seconds=60.1))
+
+
+def test_file_loudness_preserves_energy_above_speech_analysis_band(tmp_path):
+    import soundfile as sf
+    from studio.analysis import analyze_files
+    rate = 48000
+    time = np.arange(rate)/rate
+    signal = (0.2*np.sin(2*np.pi*12000*time)).astype(np.float32)
+    source = tmp_path/'high-frequency.wav'
+    sf.write(source, signal, rate, subtype='FLOAT')
+    report, _, _, _ = analyze_files(source, source, tmp_path/'analysis')
+    assert report['reference']['rms_dbfs'] == pytest.approx(-16.99, abs=0.05)
+    assert report['reference']['level_sample_rate'] == 48000
+    assert report['reference']['sample_rate'] == 16000
+    assert report['reference']['loudness_lufs'] is not None
+    assert report['schema_version'] == 2

@@ -19,12 +19,13 @@ def atomic_json(path, value):
 
 
 def reference_transcript(preview, folder, language, progress):
-    from studio.models import ASR_REVISION
-    key = hashlib.sha256(preview.read_bytes()+ASR_REVISION.encode()+str(language).encode()+b'level-v1').hexdigest()
+    from studio.models import ASR_REVISION, MALAYALAM_ASR_REVISION
+    key = hashlib.sha256(preview.read_bytes()+ASR_REVISION.encode()+MALAYALAM_ASR_REVISION.encode()
+                         +str(language).encode()+b'level-script-v2').hexdigest()
     target = REFERENCES/'transcripts'/f'{key}.json'
     if target.is_file():
         data = json.loads(target.read_text(encoding='utf-8'))
-        if data.get('text', '').strip():
+        if data.get('text', '').strip() and data.get('script_check', {}).get('reliable'):
             progress('Reusing the selected sample transcript')
             return data['text']
     from studio.recognition import recognize
@@ -32,6 +33,9 @@ def reference_transcript(preview, folder, language, progress):
     if not result['text'].strip():
         from studio.audio import AudioError
         raise AudioError('The sample could not be transcribed. Use clearer speech or enter its exact words.')
+    if not result['script_check']['reliable']:
+        from studio.audio import AudioError
+        raise AudioError('The sample transcript has an incompatible script. Choose its reference language or enter the exact words in the selected clip.')
     target.parent.mkdir(parents=True, exist_ok=True)
     atomic_json(target, result)
     return result['text']

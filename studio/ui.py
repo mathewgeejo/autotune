@@ -10,6 +10,11 @@ from studio.jobs import JobManager, BusyError
 from studio.languages import LANGUAGES
 from studio.speech import split_text, prepare_sample
 from studio.style import CSS
+from studio.accessibility import CSS as A11Y_CSS, JS as A11Y_JS, diagnostic_table
+
+ACOUSTIC_HEADERS = ['Measurement', 'Reference', 'Generated', 'Difference', 'Unit']
+SEGMENT_HEADERS = ['Reference seconds', 'Output seconds', 'Spectral distance', 'Pitch difference (cents)']
+WORD_HEADERS = ['Type', 'Expected', 'Recognized', 'Output seconds']
 
 manager = JobManager()
 CSS += """
@@ -28,6 +33,7 @@ CSS += """
 .diagnostic-table .table-wrap { max-width: 100%; overflow-x: auto; }
 .footer { line-height: 1.6; }
 """
+CSS += A11Y_CSS
 
 
 def generate(source, text, start, end, language='auto', quality='Detailed', reference_text='', reference_language='auto'):
@@ -92,14 +98,20 @@ def analysis_view(report):
     if content and content.get('available'):
         summary.append(f"- **Recognized word errors:** {content['word_error_rate']*100:.1f}%. **Grapheme errors:** {content['grapheme_error_rate']*100:.1f}%.")
         summary.append('- Recognition can also make mistakes. Inspect the word-level differences before deciding the voice model missed a word.')
+    elif content:
+        summary.append('- **Word checking unavailable:** '+content.get('reason', 'Add the expected spoken words.'))
     if not verifier:
         summary.append('- Choose **Full quality audit** to add independent speaker verification and multilingual word checking.')
     summary.append('- Different words naturally have different pitch, timing, and spectra. Alignment is available only for the same spoken words.')
+    if report.get('measurement_scope'):
+        summary.append('- '+report['measurement_scope'])
     segments = [[row['reference_seconds'], row['output_seconds'], row['spectral_distance'], row['pitch_difference_cents']]
                 for row in report['aligned_comparison'].get('largest_spectral_differences', [])]
     words = [[row['type'], row['expected'], row['recognized'], row.get('output_seconds')]
              for row in (content or {}).get('differences', [])]
-    return '\n'.join(summary), rows, segments, words
+    return ('\n'.join(summary), diagnostic_table('Acoustic measurements', ACOUSTIC_HEADERS, rows),
+            diagnostic_table('Where the acoustic shape changes', SEGMENT_HEADERS, segments),
+            diagnostic_table('Content differences', WORD_HEADERS, words))
 
 
 def poll_updates(job_id, delivered):
@@ -183,7 +195,7 @@ def create_app():
         button_secondary_background_fill='#262b3e', button_secondary_background_fill_dark='#262b3e',
         button_secondary_text_color='#e5e6ef', button_secondary_text_color_dark='#e5e6ef')
     language_options = [('Auto detect', 'auto')]+[(label, code) for code, label in LANGUAGES.items()]
-    with gr.Blocks(title='Voice Studio | Clone, listen, compare', theme=theme, css=CSS,
+    with gr.Blocks(title='Voice Studio | Clone, listen, compare', theme=theme, css=CSS, js=A11Y_JS,
                    analytics_enabled=False, delete_cache=(3600, 86400), fill_width=True) as demo:
         gr.HTML('''<div class="studio-header"><div class="brand">VOICE STUDIO</div>
         <h1>Give your words a familiar voice.</h1>
@@ -216,7 +228,7 @@ def create_app():
                         with gr.Row():
                             language = gr.Dropdown(language_options, value='auto', label='Speech language')
                             quality = gr.Radio(['Balanced', 'Detailed'], value='Detailed', label='Indic quality',
-                                info='Detailed uses full precision and more refinement for Hindi/Malayalam. It takes longer.')
+                                info='Indic cloning is experimental. Detailed uses full precision and takes longer; matching the reference language helps pronunciation.')
                         text = gr.Textbox(label='Text to speak', lines=6, max_lines=12, max_length=5000,
                                           placeholder='Type in English, Hindi, or Malayalam...', elem_id='speech-text')
                         gr.Markdown('Up to 5,000 characters. Longer text is generated in passages and joined into one WAV.')
@@ -249,16 +261,15 @@ def create_app():
                     'Enable same words only for a true reference reading of the generated passage.')
                 compare = gr.Button('Analyze voices', variant='primary')
                 analysis_summary = gr.Markdown('The comparison will appear here.', elem_id='analysis-summary')
-                analysis_table = gr.Dataframe(headers=['Measurement', 'Reference', 'Generated', 'Difference', 'Unit'],
-                    datatype=['str']*5, interactive=False, label='Acoustic measurements', min_width=0,
-                    column_widths=[190, 105, 105, 105, 75], elem_classes=['diagnostic-table'])
+                analysis_table = gr.HTML(diagnostic_table('Acoustic measurements', ACOUSTIC_HEADERS),
+                    elem_classes=['diagnostic-table'])
                 analysis_plot = gr.Plot(label='Pitch, energy, and spectrum', min_width=0, elem_id='analysis-plot')
                 with gr.Accordion('Largest aligned differences (same words only)', open=False):
-                    analysis_segments = gr.Dataframe(headers=['Reference seconds', 'Output seconds', 'Spectral distance', 'Pitch difference (cents)'],
-                        interactive=False, label='Where the acoustic shape changes', min_width=0, elem_classes=['diagnostic-table'])
+                    analysis_segments = gr.HTML(diagnostic_table('Where the acoustic shape changes', SEGMENT_HEADERS),
+                        elem_classes=['diagnostic-table'])
                 with gr.Accordion('Recognized word differences', open=False):
-                    analysis_words = gr.Dataframe(headers=['Type', 'Expected', 'Recognized', 'Output seconds'],
-                        interactive=False, label='Content differences', min_width=0, elem_classes=['diagnostic-table'])
+                    analysis_words = gr.HTML(diagnostic_table('Content differences', WORD_HEADERS),
+                        elem_classes=['diagnostic-table'])
                 with gr.Row():
                     analysis_json = gr.File(label='Measurements JSON', interactive=False)
                     analysis_csv = gr.File(label='Frame measurements CSV', interactive=False)

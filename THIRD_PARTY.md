@@ -5,6 +5,7 @@
 - Vocos waveform decoding: charactr/vocos-mel-24khz, MIT, included in the pinned DhVaani export.
 - Independent speaker verification: Microsoft WavLM base-plus speaker verification, public ONNX conversion by Xenova. It is separate from the voice-cloning engine; its scores do not establish perceptual indistinguishability.
 - Independent transcription: Whisper large-v3-turbo, public CTranslate2 conversion by mobiuslabsgmbh, pinned in `studio/models.py`. No expected-text prompt is supplied when measuring content errors.
+- Native Malayalam transcription: `smcproject/vegam-whisper-medium-ml`, MIT CTranslate2 conversion of `thennal/whisper-medium-ml`, revision `21334192f79d87cc05fe4253d7d839b5a42c33bf`. It uses the pinned multilingual `openai/whisper-tiny` tokenizer, not the incompatible large-v3 vocabulary. Model card: https://huggingface.co/smcproject/vegam-whisper-medium-ml. Its training data includes FLEURS, so FLEURS clips are calibration examples and are not claimed to be independent held-out tests of this recognizer.
 - Acoustic analysis: NumPy/SciPy, BS.1770 loudness via pyloudnorm, Plotly charts. Pitch and spectral comparisons are descriptive diagnostics, not clinical assessments or claims of speaker identity.
 
 Upstream licenses and model cards apply. No paid inference API is used.

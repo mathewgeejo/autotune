@@ -16,12 +16,13 @@ def ffmpeg():
     return imageio_ffmpeg.get_ffmpeg_exe()
 
 
-def decode(source, target, start=0, duration=None, rate=44100, channels=1):
+def decode(source, target, start=0, duration=None, rate=44100, channels=1, floating=False):
     args = [ffmpeg(), '-nostdin', '-hide_banner', '-loglevel', 'error', '-y',
             '-ss', str(start), '-i', str(source)]
     if duration is not None:
         args += ['-t', str(duration)]
-    args += ['-vn', '-ar', str(rate), '-ac', str(channels), '-c:a', 'pcm_s16le', str(target)]
+    args += ['-vn', '-ar', str(rate), '-ac', str(channels),
+             '-c:a', 'pcm_f32le' if floating else 'pcm_s16le', str(target)]
     result = subprocess.run(args, capture_output=True, text=True, check=False,
                             creationflags=HIDDEN_WINDOW, timeout=120)
     if result.returncode:

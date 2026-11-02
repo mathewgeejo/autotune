@@ -16,6 +16,9 @@ def configure():
     os.environ['HF_HOME'] = str(MODELS / 'huggingface')
     os.environ['HF_HUB_CACHE'] = str(MODELS / 'huggingface/hub')
     os.environ['HF_HUB_DOWNLOAD_TIMEOUT'] = '60'
+    # Direct resumable HTTP proved substantially more reliable than CAS/Xet on
+    # this connection. Allow an explicit user override, never a paid endpoint.
+    os.environ.setdefault('HF_HUB_DISABLE_XET', '1')
     os.environ['HUGGINGFACE_HUB_CACHE'] = str(MODELS / 'huggingface/hub')
     os.environ['TORCH_HOME'] = str(MODELS / 'torch')
     os.environ['GRADIO_TEMP_DIR'] = str(DATA / 'tmp')

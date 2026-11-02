@@ -1,5 +1,36 @@
 # Voice-cloning verification - 2 November 2026
 
+## Current multilingual work
+
+The expanded pipeline is **not verified as near-indistinguishable**. Tests now exercise real Hindi/Malayalam generation and independent recognizers/verifiers, alongside the existing English path. Bad outputs and recognizer failures are retained in the local reports.
+
+| Check | Current evidence |
+| --- | --- |
+| Regression suite | **20 passed** after adding script validation and full-band loudness coverage. No application build was run. |
+| Minute input boundary | Actual 60-second stereo speech accepted as WAV, FLAC, MP3, and AAC/M4A. Selected conditioning window was ten seconds. A 61-second recording was rejected. Report: `data/smoke/minute-inputs/checks.json`. |
+| Updated generation UI | Two actual English generations via Chrome passed with WAV links and cached voice reuse; simulated microphone capture also generated speech without JavaScript errors. |
+| Acoustic comparison UI | Actual uploads, six chart traces, JSON/CSV/ZIP downloads, and widths 1440/768/390/360 passed. Layout tests simulate viewports; they are not tests on physical phones. |
+| Accessibility | Axe-core WCAG 2.1 A/AA scan reports zero violations on Create speech and Voice analysis at 1440 and 390 pixels. Keyboard focus proceeds from text to Generate, with a visible outline. Report: `data/smoke/accessibility.json`. This automated scan does not establish complete screen-reader accessibility. |
+| Clean dependency environment | Locked 85-package runtime imported FasterWhisper and the UI without Torch. Setuptools is pinned because CTranslate2 still imports `pkg_resources`. The main environment was synced to the lean lock, removing obsolete Torch/music and experimental OpenVINO packages. |
+| Process portability | Windows tree cancellation passes. POSIX process groups and Tini are configured, but actual Linux/container execution has not been tested on this host. |
+| Hosting | Docker/Compose files and documentation prepared. No Docker/WSL runtime installed; no cloud deployment or paid resource created. |
+
+### Quality failures and evaluator calibration
+
+- Balanced INT8 with an English reference produced a Malayalam clip that the recognizer heard as English. A high speaker score on that output did **not** imply correct Malayalam content. Evidence: `multilingual-balanced.json` and `quality-benchmark-v0-raw-levels.json` under `data/smoke`.
+- Detailed FP32 with a natural Malayalam reference produced intelligible native-script output, but the original generic recognizer missed word endings. The Hindi test also had a recognized word difference. These are review findings, not a quality pass.
+- The generic large-v3-turbo recognizer rendered even a **natural Malayalam recording** in mixed Gujarati/Punjabi scripts. Its resulting word-error score is not a valid measurement of the synthesizer. The app now validates transcript script and withholds incompatible content scores. A pinned native Malayalam recognizer was added for calibration.
+- WavLM same-human/different-word controls varied widely with sample (approximately 0.61-0.96 after level matching). There is no universal 0.8 identity threshold; automated speaker cosine must be interpreted against controls, recording conditions, and listening. A review target in the benchmark is not a perceptual pass criterion.
+- Experimental OpenVoice tone conversion reduced the independent Malayalam speaker score in the measured trial (approximately 0.368 to 0.312), without improving its recognized words. It was rejected and removed from runtime code. The negative result is retained in `data/smoke/refinement-ml/audit/quality-audit.json`.
+- An Intel integrated-GPU OpenVINO experiment made warm diffusion steps faster but added about 79 seconds of compilation. It was not enabled in production or added to the lock.
+- One long test crossed Windows Modern Standby. Logged computation was about 278 seconds while elapsed wall time included several hours asleep. That run was canceled and is excluded from latency claims. Active-work timers now exclude Windows sleep, and work-scoped power requests inhibit automatic idle sleep while allowing the screen to turn off.
+
+The sampled detailed Indic generations took roughly 204-218 seconds for 2.7-3.3 seconds of output on this laptop. Download time, background load, and suspend behavior must be separated from inference time. Blind human listening, stronger native-language quality, a real Linux container run, and a verified zero-cost cloud allocation remain open gates in `WORK_PLAN.md`.
+
+## Historical English baseline
+
+The following measurements predate the multilingual/analysis expansion. In particular, the speaker scores below use the synthesizer's own encoder and the old 11-test count is not the current regression count.
+
 Tested on Windows, Intel Core i3-1115G4 (two physical cores), 7.7 GiB RAM, no CUDA GPU. These results describe the new sample-to-text speech pipeline; the old singing and instrument checks do not establish voice-cloning behavior.
 
 | Requirement | Current evidence |
@@ -33,7 +64,7 @@ The optional browser scripts need Playwright installed under `.tools/browser` us
 
 ## Practical limits
 
-- This is English voice cloning. No engine can guarantee an exact, indistinguishable copy for every reference. The reference's tone, accent, speaking style, noise, and recording quality affect the result. Personal-recording listening assessment remains necessary for subjective similarity.
+- This historical baseline covers English voice cloning. The expanded app now also routes Hindi/Malayalam to an Indic engine. No engine can guarantee an exact, indistinguishable copy for every reference. Tone, accent, speaking style, noise, and recording quality affect the result; human listening assessment remains necessary.
 - Speed varies with text, voice, background apps, and available RAM. The browser tests used approximately 0.84-1.23 GB peak worker RSS; this excludes browser/interface memory and does not measure total committed memory. This PC does not generate speech in real time.
 - The 5,000-character input limit and chunk preservation are covered by focused tests. The actual long-form browser run covers two passages, not every possible 5,000-character passage or pronunciation.
 - Gradio 5.49.1 has a duplicate-upload race on Windows: its background move can truncate an identical cached file while the browser reads it. `studio/uploads.py` reuses the existing content-addressed upload instead. Both a real repeated-upload browser retest and focused file-read checks pass. The compatibility fix is scoped to that pinned Gradio version.

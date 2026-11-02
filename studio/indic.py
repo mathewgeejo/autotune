@@ -61,6 +61,8 @@ class IndicEngine(SpeechEngine):
             raise AudioError('Choose Balanced or Detailed Indic quality.')
         self.quality = quality
         self.steps = 32 if quality == 'Detailed' else 16
+        self.speed = 1.0
+        self.guidance_scale = 1.0
         suffix = '' if quality == 'Detailed' else '_int8'
         self.precision = {'text_encoder': 'fp32' if not suffix else 'int8',
                           'flow_decoder': 'fp32' if not suffix else 'int8', 'steps': self.steps}
@@ -136,7 +138,7 @@ class IndicEngine(SpeechEngine):
         text_condition = self.text_encoder.run(None, {
             'tokens': self.text_ids(text), 'prompt_tokens': prompt_tokens,
             'prompt_features_len': np.array(prompt_length, dtype=np.int64),
-            'speed': np.array(1.0, dtype=np.float32)})[0].astype(np.float32)
+            'speed': np.array(self.speed, dtype=np.float32)})[0].astype(np.float32)
         batch, length, dimension = text_condition.shape
         if length <= prompt_length or length > 3000:
             raise AudioError('The estimated passage length is invalid. Check the reference transcript or use shorter text.')
@@ -149,7 +151,7 @@ class IndicEngine(SpeechEngine):
             progress(f'Refining pronunciation and tone: {step+1}/{self.steps}')
             velocity = self.flow_decoder.run(None, {'t': np.array(schedule[step], dtype=np.float32),
                 'x': noise, 'text_condition': text_condition, 'speech_condition': conditioning,
-                'guidance_scale': np.array(1.0, dtype=np.float32)})[0]
+                'guidance_scale': np.array(self.guidance_scale, dtype=np.float32)})[0]
             noise += velocity*(schedule[step+1]-schedule[step])
         mel = noise[:, prompt_length:].transpose(0, 2, 1)/0.1
         progress('Rendering the speech waveform')

@@ -59,7 +59,7 @@ For HTTPS behind a reverse proxy, forward all routes, WebSockets, and streaming 
 
 English uses the existing Chatterbox Turbo ONNX engine. Hindi and Malayalam use a pinned public DhVaani ONNX export, with full-precision 32-step Detailed and 16-step Balanced modes. Indic reference words are transcribed when not supplied. The selected model conditions on a focused reference window (up to ten seconds) even when the uploaded sample is a full minute; the UI shows exactly which section is used.
 
-Full quality audit uses a separate speaker verifier and Whisper large-v3-turbo recognizer. It releases the synthesis engine before loading these models. Allow several GB of RAM and model storage; CPU generation can take minutes. The interface does not promise real-time inference or an indistinguishable clone on every voice.
+Full quality audit uses a separate speaker verifier and Whisper large-v3-turbo recognizer, with native Malayalam recognition through Vegam Whisper medium-ml. The Malayalam recognizer needs an additional 3.1 GB download. Run `python scripts/download_models.py --all` to cache every engine/audit model (about 6.5 GB total), then set `HF_HUB_OFFLINE=1` for offline model loading. The app releases synthesis sessions before loading audit models. Allow several GB of RAM plus dependency/model storage; CPU generation can take minutes. The interface does not promise real-time inference or an indistinguishable clone on every voice.
 
 ## Zero-cost cloud constraint
 

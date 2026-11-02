@@ -23,6 +23,20 @@ def db(value):
     return float(20 * np.log10(max(float(value), 1e-10)))
 
 
+def level_metrics(samples, rate):
+    """Measure levels before speech-band downsampling or integer clipping."""
+    peak = float(np.max(np.abs(samples)))
+    rms = float(np.sqrt(np.mean(samples.astype(np.float64)**2)))
+    lufs = None
+    if len(samples) >= int(rate*0.4) and rms > 1e-8:
+        import pyloudnorm as pyln
+        measured = float(pyln.Meter(rate).integrated_loudness(samples.astype(np.float64)))
+        lufs = measured if np.isfinite(measured) else None
+    return {'peak_dbfs': db(peak), 'rms_dbfs': db(rms), 'loudness_lufs': lufs,
+            'crest_factor_db': db(peak)-db(rms), 'dc_offset': float(samples.mean()),
+            'clipped_percent': float(np.mean(np.abs(samples) >= 0.999)*100)}
+
+
 def mel_filters(rate, nfft, count=40):
     frequencies = np.fft.rfftfreq(nfft, 1 / rate)
     mel = lambda hz: 2595 * np.log10(1 + np.asarray(hz) / 700)
@@ -89,19 +103,10 @@ def acoustic_profile(samples, rate=ANALYSIS_RATE):
     logmel = np.log(mel)
     mfcc = dct(logmel, type=2, axis=1, norm='ortho')[:, 1:14]
     voiced = f0[f0 > 0]
-    peak = float(np.max(np.abs(samples)))
-    sample_rms = float(np.sqrt(np.mean(samples*samples)))
     silence = rms < max(0.00316, float(np.max(rms))*0.01)
-    lufs = None
-    if len(samples) >= int(rate*0.4) and sample_rms > 1e-8:
-        import pyloudnorm as pyln
-        measured = float(pyln.Meter(rate).integrated_loudness(samples.astype(np.float64)))
-        lufs = measured if np.isfinite(measured) else None
     metrics = {
         'duration_seconds': len(samples)/rate, 'sample_rate': rate,
-        'peak_dbfs': db(peak), 'rms_dbfs': db(sample_rms), 'loudness_lufs': lufs,
-        'crest_factor_db': db(peak)-db(sample_rms), 'dc_offset': float(samples.mean()),
-        'clipped_percent': float(np.mean(np.abs(samples) >= 0.999)*100),
+        **level_metrics(samples, rate),
         'silence_percent': float(silence.mean()*100),
         'voiced_percent': float(np.mean(f0 > 0)*100),
         'median_pitch_hz': float(np.median(voiced)) if len(voiced) else None,
@@ -110,6 +115,16 @@ def acoustic_profile(samples, rate=ANALYSIS_RATE):
         'spectral_centroid_hz': float(np.median(centroids[~silence])) if np.any(~silence) else None,
         'rms_dynamic_range_db': db(np.percentile(rms, 90))-db(np.percentile(rms, 10)),
     }
+    return {'metrics': metrics, 'warnings': profile_warnings(metrics),
+            'time': np.arange(len(frames))*hop/rate, 'rms_dbfs': 20*np.log10(np.maximum(rms, 1e-10)),
+            'pitch_hz': f0, 'periodicity': clarity, 'mfcc': mfcc,
+            'mean_spectrum_db': 10*np.log10(np.maximum(power.mean(axis=0), 1e-10)),
+            'frequency_hz': frequencies,
+            'wave_time': np.arange(0, len(samples), max(1, len(samples)//3000))/rate,
+            'waveform': samples[::max(1, len(samples)//3000)]}
+
+
+def profile_warnings(metrics):
     warnings = []
     if metrics['clipped_percent'] > 0.1:
         warnings.append('Clipping detected; use a quieter recording level.')
@@ -121,13 +136,7 @@ def acoustic_profile(samples, rate=ANALYSIS_RATE):
         warnings.append('DC offset detected in the recording.')
     if metrics['voiced_percent'] < 10:
         warnings.append('Little periodic voicing detected; speech may be noisy, whispered, or absent.')
-    return {'metrics': metrics, 'warnings': warnings,
-            'time': np.arange(len(frames))*hop/rate, 'rms_dbfs': 20*np.log10(np.maximum(rms, 1e-10)),
-            'pitch_hz': f0, 'periodicity': clarity, 'mfcc': mfcc,
-            'mean_spectrum_db': 10*np.log10(np.maximum(power.mean(axis=0), 1e-10)),
-            'frequency_hz': frequencies,
-            'wave_time': np.arange(0, len(samples), max(1, len(samples)//3000))/rate,
-            'waveform': samples[::max(1, len(samples)//3000)]}
+    return warnings
 
 
 def align_same_words(reference, candidate):
@@ -229,16 +238,23 @@ def compare_profiles(reference, candidate, same_words=False):
 
 def analyze_files(reference_path, output_path, folder, same_words=False):
     import soundfile as sf
+    from scipy.signal import resample_poly
     folder = Path(folder)
     folder.mkdir(parents=True, exist_ok=True)
     profiles = []
     for name, source in [('reference', reference_path), ('output', output_path)]:
-        path = decode(source, folder/f'analysis-{name}.wav', duration=MAX_SECONDS+0.1, rate=ANALYSIS_RATE)
+        path = decode(source, folder/f'analysis-{name}.wav', duration=MAX_SECONDS+0.1, rate=48000, floating=True)
         samples, rate = sf.read(path, dtype='float32')
-        profile = acoustic_profile(samples, rate)
+        profile = acoustic_profile(resample_poly(samples, 1, 3), ANALYSIS_RATE)
+        profile['metrics'].update(level_metrics(samples, rate))
+        profile['metrics']['level_sample_rate'] = rate
+        profile['warnings'] = profile_warnings(profile['metrics'])
         profiles.append(profile)
     result = compare_profiles(*profiles, same_words=same_words)
-    result['schema_version'] = 1
+    result['schema_version'] = 2
+    result['measurement_scope'] = ('Level and BS.1770 loudness: decoded mono at 48 kHz, floating point. '
+        'Pitch, frame energy, MFCC alignment, and spectra: mono at 16 kHz (up to 8 kHz). '
+        'Clipping percentage counts samples at or above full scale after decoding/downmixing; it is not a true-peak measurement.')
     target = folder/'analysis.json'
     target.write_text(json.dumps(result, indent=2, allow_nan=False), encoding='utf-8')
     tracks = {f'{name}_{key}': value for name, profile in zip(('reference', 'output'), profiles)

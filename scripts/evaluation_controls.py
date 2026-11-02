@@ -1,4 +1,5 @@
 """Calibrate automated judges on real human speech, before judging a clone."""
+import argparse
 import json
 from pathlib import Path
 import sys
@@ -7,13 +8,15 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from studio.paths import configure
 configure()
-from studio.recognition import recognize, speaker_similarity
-from studio.analysis import transcript_errors
+from studio.recognition import recognize, speaker_similarity, content_comparison
 from studio.runtime import keep_awake
 import soundfile as sf
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--languages', nargs='+', choices=['en', 'hi', 'ml'], default=['ml', 'hi', 'en'])
+    args = parser.parse_args()
     output = ROOT/'data/smoke/evaluator-controls'
     output.mkdir(parents=True, exist_ok=True)
     records = []
@@ -22,6 +25,8 @@ def main():
              ('en', ROOT/'data/smoke/dave.wav', ROOT/'data/smoke/dave.txt')]
     with keep_awake():
         for language, audio, caption in clips:
+            if language not in args.languages:
+                continue
             folder = output/language
             folder.mkdir(exist_ok=True)
             samples, rate = sf.read(audio, dtype='float32')
@@ -30,7 +35,7 @@ def main():
             same = speaker_similarity(folder/'first-half.wav', folder/'second-half.wav', folder,
                                       lambda message: print(language, message, flush=True))
             recognized = recognize(audio, folder, language, lambda message: print(language, message, flush=True))
-            errors = transcript_errors(caption.read_text(encoding='utf-8'), recognized['text'])
+            errors = content_comparison(caption.read_text(encoding='utf-8'), recognized)
             record = {'language': language, 'real_human_audio': str(audio),
                       'same_human_different_words': same,
                       'human_reference_transcription': recognized, 'human_asr_errors': errors}
