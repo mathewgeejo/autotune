@@ -9,3 +9,5 @@
 - Acoustic analysis: NumPy/SciPy, BS.1770 loudness via pyloudnorm, Plotly charts. Pitch and spectral comparisons are descriptive diagnostics, not clinical assessments or claims of speaker identity.
 
 Upstream licenses and model cards apply. No paid inference API is used.
+
+Upstream clarification checked 2 November 2026: although the DhVaani ONNX export declares Apache-2.0, the original maintainer states that the pretrained ZipVoice weights carry CC-BY-NC restrictions inherited from Emilia. Treat the voice weights as non-commercial; the code license does not override weight terms. Source: https://huggingface.co/ARTPARK-IISc/DhVaani-0.5/discussions/1.

@@ -7,7 +7,7 @@ import unicodedata
 import numpy as np
 import soundfile as sf
 
-from studio.audio import decode
+from studio.audio import decode, reference_activity
 from studio.models import (download_asr, download_speaker, ASR_ID, ASR_REVISION, SPEAKER_ID,
                            SPEAKER_REVISION, MALAYALAM_ASR_ID, MALAYALAM_ASR_REVISION)
 
@@ -50,6 +50,24 @@ def evaluation_level(audio):
     gain = min(0.08/max(rms, 1e-9), 0.95/max(peak, 1e-9)) if peak else 1
     return audio*gain, {'method': 'RMS 0.08, peak-limited at 0.95; no dynamic compression',
                         'original_rms': rms, 'gain_db': float(20*np.log10(max(gain, 1e-9)))}
+
+
+def verifier_input(audio, rate=16000):
+    """A boundary click must not determine the verifier's listening level."""
+    audio = np.asarray(audio, dtype=np.float32)
+    start, end = 0, len(audio)
+    removed = []
+    if len(audio) >= rate:
+        activity, removed = reference_activity(audio, rate)
+        active = np.flatnonzero(activity)
+        if removed and len(active):
+            if any(item['start_seconds'] < 0.04 for item in removed):
+                start = max(0, int((active[0]*0.02-0.12)*rate))
+            if any(item['end_seconds'] > len(audio)/rate-0.06 for item in removed):
+                end = min(len(audio), int(((active[-1]+1)*0.02+0.12)*rate))
+    adjusted, level = evaluation_level(audio[start:end])
+    return adjusted, {'version': 'boundary-safe-level-v2', 'start_seconds': start/rate,
+                      'end_seconds': end/rate, 'excluded_edge_transients': removed, **level}
 
 
 def recognize(path, folder, language=None, progress=lambda message: None, fallback_language=None):
@@ -109,11 +127,12 @@ def speaker_similarity(reference, candidate, folder, progress=lambda message: No
     model = ort.InferenceSession(str(graph), options, providers=['CPUExecutionProvider'])
     preprocessing = json.loads((graph.parent.parent/'preprocessor_config.json').read_text(encoding='utf-8'))
     embeddings = []
+    input_details = {}
     for name, path in [('reference', reference), ('output', candidate)]:
         progress(f'Checking independent speaker identity: {name}')
         decoded = decode(path, Path(folder)/f'verifier-{name}.wav', rate=16000, duration=60)
         audio, _ = sf.read(decoded, dtype='float32')
-        audio, _ = evaluation_level(audio)
+        audio, input_details[name] = verifier_input(audio)
         vectors = []
         # Several bounded windows use the whole minute without allocating a
         # minute-long attention tensor. Silence-only windows contribute nothing.
@@ -144,6 +163,7 @@ def speaker_similarity(reference, candidate, folder, progress=lambda message: No
     return {'available': True, 'cosine_similarity': score, 'model': SPEAKER_ID,
             'revision': SPEAKER_REVISION, 'independent_of_synthesizer': True,
             'input_preprocessing': 'RMS level-matched before the published model feature-extractor settings',
+            'input_preprocessing_details': input_details,
             'interpretation': 'Higher means more similar to this verifier. It is not a percentage of identity, '
                               'and no universal indistinguishability threshold is claimed.'}
 

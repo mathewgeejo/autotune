@@ -11,4 +11,6 @@ Current priority: improve actual voice similarity and naturalness in English and
 
 First finding: the current Malayalam reference has a 0.462 peak only 9 ms into the file, followed by about 360 ms of low energy before speech. The isolated click dominates peak normalization. Boundary-transient selection is being tested; full synthesis quality remains unproven.
 
+The first controlled comparison is measured in `QUALITY_RESULTS.md`: 0.879 → 0.921 independent speaker cosine against the same cleaned reference, with zero recognized content errors on the sampled phrase. This is a promising short-sample result, not a universal perceptual pass.
+
 Git: target account now appears in Git Credential Manager, and noninteractive `git push --dry-run origin HEAD` succeeds. GitHub CLI has separate authentication state and is not used for pushes.

@@ -1,7 +1,19 @@
 import numpy as np
 import pytest
 
-from studio.recognition import evaluation_level, transcript_script_check, content_comparison
+from studio.recognition import evaluation_level, transcript_script_check, content_comparison, verifier_input
+
+
+def test_recording_click_does_not_suppress_the_verifier_speech_level():
+    rate = 16000
+    voice = (0.02*np.sin(2*np.pi*180*np.arange(3*rate)/rate)).astype(np.float32)
+    recording = np.r_[np.zeros(rate//2), voice, np.zeros(rate//2)].astype(np.float32)
+    recording[100] = 0.9
+    adjusted, info = verifier_input(recording, rate)
+    assert info['start_seconds'] > 0.3
+    assert len(info['excluded_edge_transients']) == 1
+    assert np.sqrt(np.mean(adjusted*adjusted)) == pytest.approx(0.08, abs=1e-5)
+    assert np.max(np.abs(adjusted)) < 0.15
 
 
 def test_incompatible_asr_script_is_not_scored_as_a_synthesis_error():
