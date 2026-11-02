@@ -22,11 +22,12 @@ from studio.runtime import active_time, keep_awake
 from studio.recognition import full_audit
 from studio.analysis import analyze_files, normalize_text
 from scripts.english_decoder_trial import bundled_decoder, CapturingDecoder
+from scripts.english_kv_padding import pad_incremental_cache, compact_present
 import numpy as np
 
 
 class CpuLanguage:
-    def __init__(self, graph, progress):
+    def __init__(self, graph, progress, cache_capacity=0):
         import openvino as ov
         self.core = ov.Core()
         started = active_time()
@@ -48,14 +49,17 @@ class CpuLanguage:
         self.compile_seconds = active_time()-started
         self.runtime_version = ov.__version__
         self.calls, self.inference_seconds = 0, 0.0
+        self.cache_capacity, self.padded_calls = cache_capacity, 0
 
     def get_inputs(self):
         return self.inputs
 
     def run(self, outputs, feeds):
         started = active_time()
-        self.request.infer(feeds)
-        values = [self.request.get_tensor(name).data.copy() for name in self.names]
+        padded, restore = pad_incremental_cache(feeds, self.cache_capacity)
+        self.request.infer(padded)
+        values = compact_present([self.request.get_tensor(name).data.copy() for name in self.names], restore)
+        self.padded_calls += restore is not None
         if not all(np.isfinite(value).all() for value in values):
             raise ValueError('The candidate language model produced nonfinite output')
         self.inference_seconds += active_time()-started
@@ -67,6 +71,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--baseline-report', required=True, type=Path)
     parser.add_argument('--output', required=True, type=Path)
+    parser.add_argument('--cache-capacity', type=int, choices=[0, 512, 1024], default=0)
     args = parser.parse_args()
     if args.output.exists():
         parser.error('Use a fresh report path.')
@@ -99,17 +104,19 @@ def main():
                 engine = SpeechEngine(progress)
                 engine.sessions.pop('language_model')
                 gc.collect()
-                engine.sessions['language_model'] = CpuLanguage(graph, progress)
+                engine.sessions['language_model'] = CpuLanguage(graph, progress, args.cache_capacity)
                 engine.sessions['conditional_decoder'] = CapturingDecoder(engine.sessions['conditional_decoder'], folder)
                 engine.precision = {**PRECISION, 'language_model': 'quantized',
                     'language_backend': 'openvino-cpu', 'float_precision_hint': 'f32', 'language_threads': 2}
+                engine.precision['kv_cache_capacity'] = args.cache_capacity
                 report['result'] = engine.synthesize({'source': baseline['source_reference'],
                     'text': baseline['expected'], 'language': 'en'}, folder, progress, prepared=prepared)
                 report['language_runtime'] = {
                     'version': engine.sessions['language_model'].runtime_version,
                     'compile_seconds': engine.sessions['language_model'].compile_seconds,
                     'inference_seconds': engine.sessions['language_model'].inference_seconds,
-                    'calls': engine.sessions['language_model'].calls}
+                    'calls': engine.sessions['language_model'].calls,
+                    'padded_calls': engine.sessions['language_model'].padded_calls}
                 report['captured_passages'] = engine.sessions['conditional_decoder'].calls
                 report['state_before_audit'] = 'generated'
                 report['status'] = 'generated'

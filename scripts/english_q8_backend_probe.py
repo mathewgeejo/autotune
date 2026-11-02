@@ -18,6 +18,7 @@ from studio.models import download_models
 from studio.speech import prepare_sample, START_TOKEN
 from studio.runtime import active_time, keep_awake
 from scripts.english_decoder_trial import bundled_decoder
+from scripts.english_kv_padding import pad_incremental_cache, compact_present
 import numpy as np
 import onnxruntime as ort
 from tokenizers import Tokenizer
@@ -28,6 +29,7 @@ def main():
     parser.add_argument('--baseline-report', type=Path, required=True)
     parser.add_argument('--steps', type=int, choices=[1, 3], default=3)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--cache-capacity', type=int, choices=[0, 512, 1024], default=0)
     args = parser.parse_args()
     if args.output.exists():
         parser.error('Use a fresh report path.')
@@ -48,7 +50,8 @@ def main():
     options.add_session_config_entry('session.intra_op.allow_spinning', '0')
     options.add_session_config_entry('session.inter_op.allow_spinning', '0')
     report = {'status': 'running', 'scope': 'Identical-input Q8 language-model probe; no speech output or app backend change.',
-              'requested_backend': 'openvino-cpu-fp32', 'threads': 2, 'steps': []}
+              'requested_backend': 'openvino-cpu-fp32', 'threads': 2,
+              'cache_capacity': args.cache_capacity, 'steps': []}
     def save():
         args.output.write_text(json.dumps(report, indent=2), encoding='utf-8')
     save()
@@ -78,16 +81,27 @@ def main():
                 'INFERENCE_PRECISION_HINT': 'f32', 'INFERENCE_NUM_THREADS': 2})
             report['compile_seconds'] = active_time()-started
             request = compiled.create_infer_request()
+            unpadded_request = compiled.create_infer_request() if args.cache_capacity else None
             tokens = [START_TOKEN]
             for step in range(args.steps):
                 started = active_time()
                 expected = source.run(None, feeds)
                 cpu_seconds = active_time()-started
+                padded_feeds, restore = pad_incremental_cache(feeds, args.cache_capacity)
+                unpadded_values = None
+                if restore is not None:
+                    unpadded_request.infer(feeds)
+                    unpadded_values = [unpadded_request.get_tensor(name).data.copy() for name in names]
                 runs = []
                 for repeat in range(2):
                     started = active_time()
-                    request.infer(feeds)
-                    actual = [request.get_tensor(name).data.copy() for name in names]
+                    request.infer(padded_feeds)
+                    raw_values = [request.get_tensor(name).data.copy() for name in names]
+                    if restore is not None and repeat == 0:
+                        report['padding_shape_diagnostic'] = {'history': restore[0], 'capacity': restore[1],
+                            'outputs': {name: list(value.shape) for name, value in zip(names, raw_values)}}
+                        save()
+                    actual = compact_present(raw_values, restore)
                     runs.append(active_time()-started)
                 differences = []
                 for name, before, after in zip(names, expected, actual):
@@ -105,6 +119,12 @@ def main():
                 report['steps'].append({'step': step, 'onnxruntime_seconds': cpu_seconds,
                     'openvino_seconds': runs, 'onnxruntime_token': token, 'openvino_token': candidate_token,
                     'same_token': token == candidate_token, 'outputs': differences})
+                if unpadded_values is not None:
+                    report['steps'][-1]['padding_comparison'] = {
+                        'same_token_as_unpadded': next_token(unpadded_values[0]) == candidate_token,
+                        'logits_max_absolute_error': float(np.max(np.abs(unpadded_values[0]-actual[0]))),
+                        'logits_close': bool(np.allclose(unpadded_values[0], actual[0], rtol=1e-5, atol=1e-5)),
+                        'all_output_shapes_match': all(a.shape == b.shape for a, b in zip(unpadded_values, actual))}
                 print('STEP', step, 'ORT', cpu_seconds, 'OV', runs, 'SAME TOKEN', token == candidate_token, flush=True)
                 save()
                 tokens.append(token)
