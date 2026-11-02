@@ -11,7 +11,10 @@ MODELS = DATA / 'models'
 
 def configure():
     threads = str(max(1, min(16, int(os.environ.get('VOICE_STUDIO_THREADS', '2')))))
+    decoder_threads = str(max(1, min(16, int(os.environ.get(
+        'VOICE_STUDIO_DECODER_THREADS', str(min(4, os.cpu_count() or 2)))))))
     os.environ['VOICE_STUDIO_THREADS'] = threads
+    os.environ['VOICE_STUDIO_DECODER_THREADS'] = decoder_threads
     for path in (JOBS, REFERENCES, MODELS, DATA / 'tmp'):
         path.mkdir(parents=True, exist_ok=True)
     os.environ['HF_HOME'] = str(MODELS / 'huggingface')

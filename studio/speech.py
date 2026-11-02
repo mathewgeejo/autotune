@@ -5,6 +5,7 @@ on disk; generated text is always synthesized, never spliced from the sample.
 """
 import hashlib
 import json
+import os
 import re
 import time
 from pathlib import Path
@@ -97,14 +98,16 @@ class SpeechEngine:
         from tokenizers import Tokenizer
         paths = download_models(progress)
         self.sessions = {}
+        self.decoder_threads = int(os.environ.get('VOICE_STUDIO_DECODER_THREADS',
+                                                  os.environ.get('VOICE_STUDIO_THREADS', '2')))
         for name in ('speech_encoder', 'embed_tokens', 'language_model', 'conditional_decoder'):
             progress(f'Loading {name.replace("_", " ")} on CPU')
             options = ort.SessionOptions()
-            import os
-            options.intra_op_num_threads = int(os.environ.get('VOICE_STUDIO_THREADS', '2'))
+            options.intra_op_num_threads = (self.decoder_threads if name == 'conditional_decoder'
+                                           else int(os.environ.get('VOICE_STUDIO_THREADS', '2')))
             options.inter_op_num_threads = 1
             options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-            # Sessions don't spin and compete for this laptop's two cores.
+            # Idle sessions don't spin and compete with the active decoder.
             options.add_session_config_entry('session.intra_op.allow_spinning', '0')
             options.add_session_config_entry('session.inter_op.allow_spinning', '0')
             self.sessions[name] = ort.InferenceSession(paths[name], options,
@@ -185,6 +188,7 @@ class SpeechEngine:
             raise AudioError('The voice model returned empty audio. Try another clear speech sample.')
         self.last_chunk_metrics = {'language_model_seconds': decoder_started-composing_started,
                                    'waveform_decoder_seconds': active_time()-decoder_started,
+                                   'waveform_decoder_threads': getattr(self, 'decoder_threads', 2),
                                    'speech_tokens': len(tokens)-1, 'samples': len(wav)}
         return wav
 

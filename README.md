@@ -20,7 +20,7 @@ Longer samples can be trimmed with the start/end controls (up to 60 seconds per 
 
 ## Speed and local storage
 
-The speech pipeline uses quantized **Chatterbox Turbo ONNX** models, two CPU threads, a persistent worker, and cached speaker conditioning. The first generation downloads approximately **0.9 GB** of model files and loads the sessions. Later requests reuse the sessions and cached voice. Cancellation stops the worker and its child processes; the next request loads a fresh worker. Use **Release model from memory** when you want to free its RAM without closing the interface.
+The speech pipeline uses quantized **Chatterbox Turbo ONNX** models, a persistent worker, and cached speaker conditioning. Most sessions use two CPU threads; English waveform decoding uses up to four logical CPU threads after controlled tests found faster decoding with identical exported audio. Set `VOICE_STUDIO_THREADS` for general inference and `VOICE_STUDIO_DECODER_THREADS` separately for the English waveform decoder. Both settings accept 1–16 threads. The first generation downloads approximately **0.9 GB** of model files and loads the sessions. Later requests reuse the sessions and cached voice. Cancellation stops the worker and its child processes; the next request loads a fresh worker. Use **Release model from memory** when you want to free its RAM without closing the interface.
 
 After the selected models are downloaded, file-based processing works offline. Download English ahead of time, or cache every engine and analysis model:
 
