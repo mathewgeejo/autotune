@@ -10,6 +10,7 @@ sys.path.insert(0, str(ROOT))
 from studio.paths import configure
 configure()
 from studio.jobs import JobManager
+from studio.pronunciation import INDIC_QUALITIES
 from studio.recognition import full_audit, speaker_similarity, recognize, content_comparison
 from studio.runtime import keep_awake
 from scripts.smoke import wait
@@ -24,7 +25,7 @@ def main():
     words.add_argument('--text')
     words.add_argument('--text-file', type=Path)
     parser.add_argument('--language', choices=['en', 'ml'], required=True)
-    parser.add_argument('--quality', choices=['Balanced', 'Detailed', 'Detailed + word check'], default='Detailed')
+    parser.add_argument('--quality', choices=INDIC_QUALITIES, default='Detailed')
     parser.add_argument('--warm-baseline-report', type=Path, help='Run a normal generation first to exercise persistent-worker model ownership.')
     parser.add_argument('--baseline', type=Path)
     parser.add_argument('--baseline-reference', type=Path)

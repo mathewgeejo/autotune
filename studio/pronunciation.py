@@ -9,6 +9,7 @@ from studio.runtime import active_time
 from studio.voice_selection import compare_reading
 
 CHECKED_QUALITY = 'Detailed + word check'
+INDIC_QUALITIES = ('Balanced', 'Detailed', CHECKED_QUALITY)
 
 
 def check_pronunciation(request, folder, prepared, default_result, progress, write_report):

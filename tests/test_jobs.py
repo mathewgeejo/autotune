@@ -7,6 +7,7 @@ import pytest
 
 import studio.jobs as jobs
 from studio.paths import configure
+from studio.pronunciation import CHECKED_QUALITY
 
 
 def test_cancel_kills_children_and_allows_next_task(tmp_path, monkeypatch):
@@ -26,7 +27,7 @@ def test_cancel_kills_children_and_allows_next_task(tmp_path, monkeypatch):
     manager = jobs.JobManager()
     sample = tmp_path / 'sample.wav'
     sample.write_bytes(b'owned sample')
-    payload = {'source': str(sample), 'text': 'This is a cancellation test.'}
+    payload = {'source': str(sample), 'text': 'This is a cancellation test.', 'quality': CHECKED_QUALITY}
     first = manager.submit('clone', payload)
     try:
         with pytest.raises(jobs.BusyError):

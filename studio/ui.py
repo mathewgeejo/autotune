@@ -7,6 +7,7 @@ import gradio as gr
 
 from studio.paths import DATA, JOBS
 from studio.jobs import JobManager, BusyError
+from studio.pronunciation import INDIC_QUALITIES
 from studio.languages import LANGUAGES
 from studio.speech import split_text, prepare_sample
 from studio.style import CSS
@@ -146,6 +147,17 @@ def poll_updates(job_id, delivered):
             language = LANGUAGES.get(result.get('language', 'en'), 'English')
             updates['status'] += (f"\n{language} | {result['duration']:.1f}s speech | {result['passages']} passage(s) | "
                                   + ('cached voice reused' if result['cached_voice'] else 'voice sample learned'))
+            word_check = result.get('word_check')
+            if word_check:
+                if word_check['status'] == 'word-check-passed':
+                    note = 'Automatic word check found no differences.'
+                elif word_check['status'] == 'check-unavailable':
+                    note = 'Automatic word check unavailable; generated audio retained.'
+                elif word_check.get('selected') == 'retry':
+                    note = 'An alternate reading improved the automatic wording check.'
+                else:
+                    note = 'Original reading retained after wording and voice checks.'
+                updates['status'] += '\n'+note
             updates.update(audio=result['audio'], wav=result['audio'], selected=result['reference_preview'],
                            last_audio=result['audio'], last_reference=result['reference_preview'],
                            last_text=result.get('text', ''))
@@ -228,7 +240,7 @@ def create_app():
                         gr.HTML('<div class="step-label">02 / WORDS & LANGUAGE</div>')
                         with gr.Row():
                             language = gr.Dropdown(language_options, value='auto', label='Speech language')
-                            quality = gr.Radio(['Balanced', 'Detailed', 'Detailed + word check'], value='Detailed', label='Indic quality',
+                            quality = gr.Radio(list(INDIC_QUALITIES), value='Detailed', label='Indic quality',
                                 info='Indic cloning is experimental. Word checking takes longer and can retry Malayalam pronunciation once. Its first recognition download is about 3.1 GB.')
                         text = gr.Textbox(label='Text to speak', lines=6, max_lines=12, max_length=5000,
                                           placeholder='Type in English, Hindi, or Malayalam...', elem_id='speech-text')

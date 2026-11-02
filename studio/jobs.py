@@ -13,6 +13,7 @@ import psutil
 from studio.paths import JOBS, REFERENCES, DATA, ROOT
 from studio.processes import worker_options, stop_tree
 from studio.runtime import active_time, keep_awake
+from studio.pronunciation import INDIC_QUALITIES
 
 
 class BusyError(ValueError):
@@ -56,8 +57,8 @@ class JobManager:
             from studio.languages import resolve_language
             split_text(payload.get('text'))
             payload['language'] = resolve_language(payload.get('text', ''), payload.get('language', 'auto'))
-            if payload.get('quality', 'Detailed') not in ('Balanced', 'Detailed'):
-                raise ValueError('Choose Balanced or Detailed quality.')
+            if payload.get('quality', 'Detailed') not in INDIC_QUALITIES:
+                raise ValueError('Choose one of the available Indic quality settings.')
         with self.lock:
             if self.active:
                 raise BusyError('Another generation is running. Wait for it to finish or cancel it first.')
