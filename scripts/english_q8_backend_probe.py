@@ -19,6 +19,7 @@ from studio.speech import prepare_sample, START_TOKEN
 from studio.runtime import active_time, keep_awake
 from scripts.english_decoder_trial import bundled_decoder
 from scripts.english_kv_padding import pad_incremental_cache, compact_present
+from scripts.english_openvino_trial import cpu_language_config
 import numpy as np
 import onnxruntime as ort
 from tokenizers import Tokenizer
@@ -30,6 +31,7 @@ def main():
     parser.add_argument('--steps', type=int, choices=[1, 3], default=3)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--cache-capacity', type=int, choices=[0, 512, 1024], default=0)
+    parser.add_argument('--execution-mode', choices=['performance', 'accuracy'], default='performance')
     args = parser.parse_args()
     if args.output.exists():
         parser.error('Use a fresh report path.')
@@ -51,7 +53,8 @@ def main():
     options.add_session_config_entry('session.inter_op.allow_spinning', '0')
     report = {'status': 'running', 'scope': 'Identical-input Q8 language-model probe; no speech output or app backend change.',
               'requested_backend': 'openvino-cpu-fp32', 'threads': 2,
-              'cache_capacity': args.cache_capacity, 'steps': []}
+              'cache_capacity': args.cache_capacity, 'execution_mode': args.execution_mode,
+              'requested_properties': cpu_language_config(args.execution_mode), 'steps': []}
     def save():
         args.output.write_text(json.dumps(report, indent=2), encoding='utf-8')
     save()
@@ -77,8 +80,7 @@ def main():
             bundled = bundled_decoder(graph)
             started = active_time()
             core = ov.Core()
-            compiled = core.compile_model(bundled, 'CPU', {'PERFORMANCE_HINT': 'LATENCY',
-                'INFERENCE_PRECISION_HINT': 'f32', 'INFERENCE_NUM_THREADS': 2})
+            compiled = core.compile_model(bundled, 'CPU', cpu_language_config(args.execution_mode))
             report['compile_seconds'] = active_time()-started
             request = compiled.create_infer_request()
             unpadded_request = compiled.create_infer_request() if args.cache_capacity else None

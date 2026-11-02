@@ -22,12 +22,19 @@ from studio.runtime import active_time, keep_awake
 from studio.recognition import full_audit
 from studio.analysis import analyze_files, normalize_text
 from scripts.english_decoder_trial import bundled_decoder, CapturingDecoder
-from scripts.english_kv_padding import pad_incremental_cache, compact_present
 import numpy as np
 
 
+def cpu_language_config(execution_mode='performance'):
+    config = {'PERFORMANCE_HINT': 'LATENCY', 'INFERENCE_PRECISION_HINT': 'f32',
+              'INFERENCE_NUM_THREADS': 2, 'EXECUTION_MODE_HINT': execution_mode.upper()}
+    if execution_mode == 'accuracy':
+        config.update(DYNAMIC_QUANTIZATION_GROUP_SIZE=0, KV_CACHE_PRECISION='f32')
+    return config
+
+
 class CpuLanguage:
-    def __init__(self, graph, progress, cache_capacity=0):
+    def __init__(self, graph, progress, execution_mode='performance'):
         import openvino as ov
         self.core = ov.Core()
         started = active_time()
@@ -41,25 +48,21 @@ class CpuLanguage:
                 type='tensor(float16)' if dtype == np.float16 else 'tensor(float)'))
         self.names = ['logits']+[item.name.replace('past_key_values.', 'present.', 1)
                                  for item in self.inputs if 'past_key_values' in item.name]
-        self.compiled = self.core.compile_model(model, 'CPU', {'PERFORMANCE_HINT': 'LATENCY',
-            'INFERENCE_PRECISION_HINT': 'f32', 'INFERENCE_NUM_THREADS': 2})
+        self.compiled = self.core.compile_model(model, 'CPU', cpu_language_config(execution_mode))
         self.request = self.compiled.create_infer_request()
         for name in self.names:
             self.compiled.output(name)
         self.compile_seconds = active_time()-started
         self.runtime_version = ov.__version__
         self.calls, self.inference_seconds = 0, 0.0
-        self.cache_capacity, self.padded_calls = cache_capacity, 0
 
     def get_inputs(self):
         return self.inputs
 
     def run(self, outputs, feeds):
         started = active_time()
-        padded, restore = pad_incremental_cache(feeds, self.cache_capacity)
-        self.request.infer(padded)
-        values = compact_present([self.request.get_tensor(name).data.copy() for name in self.names], restore)
-        self.padded_calls += restore is not None
+        self.request.infer(feeds)
+        values = [self.request.get_tensor(name).data.copy() for name in self.names]
         if not all(np.isfinite(value).all() for value in values):
             raise ValueError('The candidate language model produced nonfinite output')
         self.inference_seconds += active_time()-started
@@ -71,7 +74,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--baseline-report', required=True, type=Path)
     parser.add_argument('--output', required=True, type=Path)
-    parser.add_argument('--cache-capacity', type=int, choices=[0, 512, 1024], default=0)
+    parser.add_argument('--execution-mode', choices=['performance', 'accuracy'], default='performance')
+    parser.add_argument('--decoder-seed', type=int, help='Set and record the global ORT seed before constructing sessions.')
     args = parser.parse_args()
     if args.output.exists():
         parser.error('Use a fresh report path.')
@@ -89,7 +93,8 @@ def main():
         raise ValueError('The selected reference changed')
     report = {'status': 'running', 'baseline_report': str(args.baseline_report),
               'scope': 'Experimental Q8 language backend with original encoders/decoder. No perceptual-equivalence claim.',
-              'decoder_randomness': 'Original internal vocoder noise is not frozen; this is not a PCM-identity comparison.',
+              'decoder_randomness': 'Internal vocoder noise; requested global seed is recorded. PCM identity requires a direct check.',
+              'requested_ort_seed': args.decoder_seed,
               'git_revision': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()}
     def save():
         temporary = args.output.with_suffix('.tmp')
@@ -101,22 +106,24 @@ def main():
     try:
         with keep_awake():
             try:
+                if args.decoder_seed is not None:
+                    import onnxruntime as ort
+                    ort.set_seed(args.decoder_seed)
                 engine = SpeechEngine(progress)
                 engine.sessions.pop('language_model')
                 gc.collect()
-                engine.sessions['language_model'] = CpuLanguage(graph, progress, args.cache_capacity)
+                engine.sessions['language_model'] = CpuLanguage(graph, progress, args.execution_mode)
                 engine.sessions['conditional_decoder'] = CapturingDecoder(engine.sessions['conditional_decoder'], folder)
                 engine.precision = {**PRECISION, 'language_model': 'quantized',
                     'language_backend': 'openvino-cpu', 'float_precision_hint': 'f32', 'language_threads': 2}
-                engine.precision['kv_cache_capacity'] = args.cache_capacity
+                engine.precision['execution_mode'] = args.execution_mode
                 report['result'] = engine.synthesize({'source': baseline['source_reference'],
                     'text': baseline['expected'], 'language': 'en'}, folder, progress, prepared=prepared)
                 report['language_runtime'] = {
                     'version': engine.sessions['language_model'].runtime_version,
                     'compile_seconds': engine.sessions['language_model'].compile_seconds,
                     'inference_seconds': engine.sessions['language_model'].inference_seconds,
-                    'calls': engine.sessions['language_model'].calls,
-                    'padded_calls': engine.sessions['language_model'].padded_calls}
+                    'calls': engine.sessions['language_model'].calls}
                 report['captured_passages'] = engine.sessions['conditional_decoder'].calls
                 report['state_before_audit'] = 'generated'
                 report['status'] = 'generated'
