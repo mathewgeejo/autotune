@@ -86,3 +86,16 @@ def test_reference_limits_and_single_transient_are_rejected(tmp_path):
     sf.write(path, np.r_[np.zeros(2*rate), np.ones(rate//5)*0.5, np.zeros(rate)], rate)
     with pytest.raises(AudioError, match='continuous speech'):
         prepare_sample(path, tmp_path)
+
+
+def test_completed_request_keeps_its_precision_when_engine_is_reused(tmp_path):
+    engine = SpeechEngine.__new__(SpeechEngine)
+    engine.precision = {'steps': 32, 'speed': 1.0}
+    engine.conditioning = lambda audio, digest, progress: (None, True)
+    engine.generate_chunk = lambda text, voice, progress: np.full(24000, 0.1, dtype=np.float32)
+    preview = tmp_path/'voice-sample.wav'
+    sf.write(preview, np.full(72000, 0.1, dtype=np.float32), 24000)
+    result = engine.synthesize({'text': 'A completed request.'}, tmp_path, lambda message: None,
+        prepared=(np.zeros((1, 72000), dtype=np.float32), preview, 'prepared'))
+    engine.precision.update(steps=8, speed=0.85)
+    assert result['precision'] == {'steps': 32, 'speed': 1.0}

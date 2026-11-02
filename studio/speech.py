@@ -220,7 +220,7 @@ class SpeechEngine:
                   'synthesis_seconds': active_time()-started,
                   'model_revision': getattr(self, 'revision', REVISION),
                   'model': getattr(self, 'model_id', MODEL_ID),
-                  'precision': getattr(self, 'precision', PRECISION),
+                  'precision': dict(getattr(self, 'precision', PRECISION)),
                   'language': request.get('language', 'en'), 'text': request['text'],
                   'chunk_timings': chunk_metrics}
         (folder / 'speech-metrics.json').write_text(json.dumps(result, indent=2), encoding='utf-8')

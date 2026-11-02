@@ -140,20 +140,22 @@ class IndicEngine(SpeechEngine):
         return (features.astype(np.float32), self.text_ids(self.reference_text), original_rms), reused
 
     def text_conditioning(self, text, prompt_tokens, prompt_length):
+        if not 0.25 <= self.speed <= 4:
+            raise AudioError('Indic speaking rate must be between 0.25 and 4.')
         feeds = {
             'tokens': self.text_ids(text), 'prompt_tokens': prompt_tokens,
             'prompt_features_len': np.array(prompt_length, dtype=np.int64),
             'speed': np.array(1.0, dtype=np.float32)}
         condition = self.text_encoder.run(None, feeds)[0].astype(np.float32)
-        if self.speed != 1.0:
-            if not 0.25 <= self.speed <= 4:
-                raise AudioError('Indic speaking rate must be between 0.25 and 4.')
-            # The exported speed scales the *entire* prompt+target duration.
-            # Keep the reference window fixed and scale only the new speech.
-            total = condition.shape[1]
-            desired = prompt_length+(total-prompt_length)/self.speed
-            feeds['speed'] = np.array(total/desired, dtype=np.float32)
-            condition = self.text_encoder.run(None, feeds)[0].astype(np.float32)
+        if self.speed != 1.0 and condition.shape[1] > prompt_length:
+            # The graph's duration expansion moves text throughout the full
+            # prompt+target sequence. Changing its speed also moves prompt text
+            # relative to the fixed reference audio. Retain the original prompt
+            # frames and resample only target frames, without blending embeddings.
+            target = condition[:, prompt_length:]
+            count = max(1, round(target.shape[1]/self.speed))
+            indices = np.linspace(0, target.shape[1]-1, count).round().astype(np.int64)
+            condition = np.concatenate((condition[:, :prompt_length], target[:, indices]), axis=1)
         return condition
 
     def generate_chunk(self, text, voice, progress):

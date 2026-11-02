@@ -1,8 +1,9 @@
-"""Measure whether fewer FP32 flow steps retain the fixed baseline's voice and words."""
+"""Controlled FP32 step, guidance, and timing comparisons against a fixed voice/text."""
 import argparse
 import gc
 import hashlib
 import json
+import os
 from pathlib import Path
 import sys
 
@@ -20,8 +21,18 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--baseline-report', type=Path, required=True)
     parser.add_argument('--steps', type=int, nargs='+', choices=[8, 16, 24, 32], default=[8, 16])
+    parser.add_argument('--guidance', type=float, nargs='+', default=[2.0])
+    parser.add_argument('--speed', type=float, nargs='+', default=[1.0])
+    parser.add_argument('--accelerator', choices=['cpu', 'intel'], default='cpu')
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
+    if args.output.exists():
+        parser.error('Use a fresh output path to preserve prior measurements.')
+    if any(not 0.25 <= speed <= 4 for speed in args.speed):
+        parser.error('Speed must be between 0.25 and 4.')
+    if any(not 0 <= guidance <= 5 for guidance in args.guidance):
+        parser.error('Guidance must be between 0 and 5.')
+    os.environ['VOICE_STUDIO_ACCELERATOR'] = args.accelerator
     baseline = json.loads(args.baseline_report.read_text(encoding='utf-8'))
     root = args.output.parent/args.output.stem
     root.mkdir(parents=True, exist_ok=True)
@@ -30,36 +41,52 @@ def main():
     prepared = prepare_sample(baseline['source_reference'], reference_folder)
     old_preview = Path(baseline['result']['reference_preview'])
     assert hashlib.sha256(old_preview.read_bytes()).digest() == hashlib.sha256(prepared[1].read_bytes()).digest(), 'The selected reference changed; this is not a controlled comparison.'
-    report = {'baseline_report': str(args.baseline_report), 'comparison': 'Fixed reference, text, FP32 weights, guidance 2 and seed 666; only flow steps vary.',
+    report = {'baseline_report': str(args.baseline_report),
+              'comparison': 'Fixed reference, text, FP32 weights and seed 666; record steps, guidance, speed and actual backend for each trial.',
+              'requested_accelerator': args.accelerator,
+              'baseline_precision': baseline['result']['precision'],
               'scope': 'Automated engineering comparison; perceptual equivalence remains unproven.', 'trials': []}
+    if 'natural_content_control' in baseline:
+        report['natural_content_control'] = baseline['natural_content_control']
     def save():
         args.output.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
     progress = lambda message, **kwargs: print(message, flush=True)
     with keep_awake():
         engine = IndicEngine(progress, 'Detailed')
         for steps in args.steps:
-            folder = root/f'steps-{steps}'
-            folder.mkdir(exist_ok=True)
-            if (folder/'speech.wav').exists():
-                raise RuntimeError('Use a fresh output name to preserve prior trials.')
-            engine.steps = steps
-            engine.precision = {**engine.precision, 'steps': steps}
-            print(f'TRIAL {steps} steps', flush=True)
-            result = engine.synthesize({'source': baseline['source_reference'], 'text': baseline['expected'],
-                'language': baseline['language'], 'reference_text': baseline['result']['reference_text']},
-                folder, progress, prepared)
-            report['trials'].append({'steps': steps, 'result': result, 'state': 'generated'})
-            save()
+            for guidance in args.guidance:
+                for speed in args.speed:
+                    name = f'steps-{steps}-guidance-{guidance:g}-speed-{speed:g}'
+                    folder = root/name
+                    folder.mkdir(exist_ok=True)
+                    if (folder/'speech.wav').exists():
+                        raise RuntimeError('Use a fresh output name to preserve prior trials.')
+                    engine.steps, engine.guidance_scale, engine.speed = steps, guidance, speed
+                    engine.precision = {**engine.precision, 'steps': steps, 'guidance_scale': guidance, 'speed': speed}
+                    print(f'TRIAL {name}', flush=True)
+                    trial = {'name': name, 'steps': steps, 'guidance': guidance, 'speed': speed, 'state': 'running'}
+                    report['trials'].append(trial)
+                    save()
+                    try:
+                        trial['result'] = engine.synthesize({'source': baseline['source_reference'], 'text': baseline['expected'],
+                            'language': baseline['language'], 'reference_text': baseline['result']['reference_text']},
+                            folder, progress, prepared)
+                        trial['state'] = 'generated'
+                    except Exception as exc:
+                        trial.update(state='failed', error=f'{type(exc).__name__}: {exc}')
+                        save()
+                        raise
+                    save()
         del engine
         gc.collect()
         for trial in report['trials']:
             result = trial['result']
-            folder = root/f"steps-{trial['steps']}"
+            folder = root/trial['name']
             trial['audit'] = full_audit(result['reference_preview'], result['audio'], baseline['expected'],
                                        folder, baseline['language'], progress)
             trial['state'] = 'measured'
             save()
-            print(json.dumps({'steps':trial['steps'],'synthesis_seconds':result['synthesis_seconds'],
+            print(json.dumps({'name':trial['name'],'synthesis_seconds':result['synthesis_seconds'],
                               'speaker_cosine':trial['audit']['speaker_verification'].get('cosine_similarity'),
                               'content':trial['audit']['content_comparison']}, ensure_ascii=False), flush=True)
 
