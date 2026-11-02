@@ -55,3 +55,10 @@ Two additional Malayalam recordings from OpenSLR SLR63's male archive are now co
 The regression suite now passes **31 tests**. Checkpoints are pushed to `mathewgeejo/autotune`; no application builds or deployment work are part of this quality iteration.
 
 Per-passage stage timings are now recorded in `speech-metrics.json`: English language-model versus waveform-decoder time; Indic text-conditioning, flow, and waveform-decoder time. This adds measurement without changing sampling or inference precision. Seven relevant speech/Indic checks and Ruff correctness checks pass. Additional male-archive and Jo English comparisons are underway.
+
+## Additional completed voices and measured bottlenecks
+
+- OpenSLR filename group `00269`: speaker cosine **0.9298**, same-recording control **0.9325**, zero recognized content errors. Request 110.5 seconds, 766 MB peak worker RSS. Diffusion used 102.1 seconds; text conditioning and waveform decoding together used under 0.2 seconds. Evidence: `data/quality/ml-male-one-valid.json`.
+- Jo English: speaker cosine **0.9143**, same-recording control **0.9631**, zero recognized content errors. Request 31.7 seconds, 892 MB peak worker RSS. Language generation used 6.9 seconds and waveform decoding 10.4 seconds. Evidence: `data/quality/en-jo-baseline.json`.
+
+An optional Intel GPU experiment is now testing the **same FP32 flow model and 32 steps** against CPU output. It records waveform error/correlation, cold compilation, repeated synthesis, and independent content/identity checks. The package is installed in an isolated `.tools/openvino-runtime` folder; production dependencies and backend selection remain unchanged. No speed or fidelity result is claimed until the full trial finishes.

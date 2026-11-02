@@ -1,0 +1,3 @@
+# Optional experiment runtime; not part of the production dependency lock.
+openvino==2026.4.1
+openvino-telemetry==2025.2.0
