@@ -21,3 +21,19 @@ The apparent change from older scores around 0.45 to 0.92 must **not** be report
 Evidence: `data/quality/ml-edge-trial.json`, `data/quality/verifier-v2-control/report.json`, and job `2f0c6736dac4434c957df0ecd9cd60d0`. These are local audio/measurement artifacts excluded from Git. Checkpoint source and tests are versioned.
 
 Next: independent English baseline; multiple Malayalam references and longer sentences; controlled step-count/decoding optimization; comparisons with stronger supported models when they address a measured failure. Preserve difficult and failed examples, calibrate every judge, and prepare listening comparisons before claiming the requested perceptual result.
+
+## English baseline and initial speed sweep
+
+The new Dave English run has zero recognized content errors and independent speaker cosine 0.693; same-human/different-word control is 0.713. Request time was 25.7 seconds, peak worker RSS 881 MB. The expressive reference makes this a difficult identity control; retain it alongside steadier references. Evidence: `data/quality/en-dave-baseline.json`.
+
+On the fixed cleaned Malayalam reference, FP32/guidance-2 trials measured:
+
+| Flow steps | Synthesis seconds | Speaker cosine | Recognized word errors |
+| --- | ---: | ---: | ---: |
+| 8 | 36.3 | 0.9368 | 0 |
+| 16 | 67.1 | 0.9192 | 0 |
+| 32 baseline | about 133 | 0.9214 | 0 |
+
+These are candidate optimizations. Defaults remain unchanged until more voices, longer text, and acoustic/naturalness checks support the change. Evidence: `data/quality/ml-steps-sweep.json`.
+
+Corpus coverage: all 958 rows in the pinned Malayalam FLEURS test metadata are labeled FEMALE. The collector records missing labels instead of falsely claiming balanced coverage. Gender labels are not speaker IDs. Revision: `70bb2e84b976b7e960aa89f1c648e09c59f894dd`.
