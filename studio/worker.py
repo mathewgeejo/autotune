@@ -1,11 +1,14 @@
 """Persistent, cancellable ONNX worker; never loads AI into the interface."""
 import contextlib
+import gc
+import hashlib
 import json
 from pathlib import Path
 import sys
 import traceback
+import zipfile
 
-from studio.paths import configure
+from studio.paths import configure, REFERENCES
 configure()
 
 
@@ -13,6 +16,47 @@ def atomic_json(path, value):
     temporary = path.with_suffix('.tmp')
     temporary.write_text(json.dumps(value), encoding='utf-8')
     temporary.replace(path)
+
+
+def reference_transcript(preview, folder, language, progress):
+    from studio.models import ASR_REVISION
+    key = hashlib.sha256(preview.read_bytes()+ASR_REVISION.encode()+str(language).encode()+b'level-v1').hexdigest()
+    target = REFERENCES/'transcripts'/f'{key}.json'
+    if target.is_file():
+        data = json.loads(target.read_text(encoding='utf-8'))
+        if data.get('text', '').strip():
+            progress('Reusing the selected sample transcript')
+            return data['text']
+    from studio.recognition import recognize
+    result = recognize(preview, folder, language, progress)
+    if not result['text'].strip():
+        from studio.audio import AudioError
+        raise AudioError('The sample could not be transcribed. Use clearer speech or enter its exact words.')
+    target.parent.mkdir(parents=True, exist_ok=True)
+    atomic_json(target, result)
+    return result['text']
+
+
+def analyze(request, folder, progress):
+    from studio.analysis import analyze_files
+    progress('Measuring pitch, loudness, clipping, and spectral characteristics')
+    report, _, json_path, csv_path = analyze_files(request['source'], request['comparison'], folder,
+                                                  same_words=bool(request.get('same_words')))
+    if request.get('full_audit'):
+        from studio.recognition import full_audit
+        report.update(full_audit(request['source'], request['comparison'], request.get('text', ''), folder,
+                                 request.get('language') if request.get('language') != 'auto' else None, progress))
+        Path(json_path).write_text(json.dumps(report, indent=2, allow_nan=False), encoding='utf-8')
+    archive = folder/'audio-diagnostics.zip'
+    with zipfile.ZipFile(archive, 'w', compression=zipfile.ZIP_DEFLATED) as zipped:
+        for path in folder.glob('analysis*'):
+            if path.is_file():
+                zipped.write(path, path.name)
+        if (folder/'quality-audit.json').is_file():
+            zipped.write(folder/'quality-audit.json', 'quality-audit.json')
+    return {'analysis_json': json_path, 'analysis_csv': csv_path,
+            'analysis_tracks': str(folder/'analysis-tracks.npz'), 'analysis_archive': str(archive),
+            'analysis': report}
 
 
 def run(request_path, engine=None):
@@ -30,17 +74,46 @@ def run(request_path, engine=None):
                 from studio.audio import AudioError
                 from studio.speech import SpeechEngine, split_text, prepare_sample
                 request = json.loads(request_path.read_text(encoding='utf-8'))
-                split_text(request.get('text'))
-                progress('Checking your voice sample')
-                prepared = prepare_sample(request['source'], folder,
-                                          request.get('start'), request.get('end'))
-                if engine is None:
-                    progress('Starting local voice cloning (first use downloads about 0.9 GB)')
-                    engine = SpeechEngine(progress)
+                if request['mode'] == 'analyze':
+                    if request.get('full_audit'):
+                        engine = None
+                        gc.collect()
+                    result = analyze(request, folder, progress)
+                    progress('Audio comparison ready. Open the analysis charts and reports.')
                 else:
-                    progress('Reusing the loaded speech model')
-                result = engine.synthesize(request, folder, progress, prepared=prepared)
-                progress('Your speech is ready to play and download.')
+                    from studio.languages import resolve_language
+                    split_text(request.get('text'))
+                    language = resolve_language(request.get('text', ''), request.get('language', 'auto'))
+                    request['language'] = language
+                    progress('Checking your voice sample')
+                    prepared = prepare_sample(request['source'], folder,
+                                              request.get('start'), request.get('end'))
+                    quality = request.get('quality', 'Detailed')
+                    key = ('en',) if language == 'en' else ('indic', quality)
+                    if engine is not None and getattr(engine, 'engine_key', None) != key:
+                        engine = None
+                        gc.collect()
+                    if language != 'en' and not request.get('reference_text', '').strip():
+                        engine = None
+                        gc.collect()
+                        reference_language = request.get('reference_language')
+                        if reference_language in ('auto', ''):
+                            reference_language = None
+                        request['reference_text'] = reference_transcript(prepared[1], folder,
+                                                                        reference_language, progress)
+                    if engine is None:
+                        if language == 'en':
+                            progress('Starting the English cloning engine')
+                            engine = SpeechEngine(progress)
+                        else:
+                            from studio.indic import IndicEngine
+                            progress('Starting the Malayalam/Hindi cloning engine')
+                            engine = IndicEngine(progress, quality)
+                        engine.engine_key = key
+                    else:
+                        progress('Reusing the loaded speech model')
+                    result = engine.synthesize(request, folder, progress, prepared=prepared)
+                    progress('Your speech is ready to play and download.')
                 atomic_json(folder / 'result.json', result)
             except Exception as exc:
                 traceback.print_exc()

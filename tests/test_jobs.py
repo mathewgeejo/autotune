@@ -9,7 +9,6 @@ import studio.jobs as jobs
 from studio.paths import configure
 
 
-@pytest.mark.skipif(sys.platform != 'win32', reason='Windows process-tree cancellation')
 def test_cancel_kills_children_and_allows_next_task(tmp_path, monkeypatch):
     configure()
     monkeypatch.setattr(jobs, 'JOBS', tmp_path)

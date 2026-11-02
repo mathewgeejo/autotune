@@ -14,3 +14,4 @@ plotly==6.5.0
 regex==2024.11.6
 faster-whisper==1.2.1
 ctranslate2==4.6.0
+setuptools==80.9.0

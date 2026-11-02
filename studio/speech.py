@@ -13,8 +13,9 @@ import numpy as np
 import soundfile as sf
 
 from studio.audio import AudioError, decode, validate_signal, best_reference
-from studio.models import REVISION, PRECISION, download_models
+from studio.models import REVISION, PRECISION, MODEL_ID, download_models
 from studio.paths import REFERENCES
+from studio.runtime import active_time
 
 RATE = 24000
 MAX_TEXT = 5000
@@ -81,6 +82,11 @@ def prepare_sample(source, folder, start=0, end=0):
     mono *= min(0.9 / max(peak, 0.001), 3)
     preview = folder / 'voice-sample.wav'
     sf.write(preview, mono, RATE, subtype='PCM_16')
+    (folder/'reference-section.json').write_text(json.dumps({
+        'uploaded_selection_seconds': len(samples)/rate,
+        'used_start_seconds': start+selected_start+left/rate,
+        'used_duration_seconds': len(mono)/rate,
+        'conditioning_limit_seconds': 10}), encoding='utf-8')
     digest = hashlib.sha256(preview.read_bytes() + REVISION.encode() + b'conditioning-v1').hexdigest()
     return mono[np.newaxis].astype(np.float32), preview, digest
 
@@ -94,7 +100,8 @@ class SpeechEngine:
         for name in ('speech_encoder', 'embed_tokens', 'language_model', 'conditional_decoder'):
             progress(f'Loading {name.replace("_", " ")} on CPU')
             options = ort.SessionOptions()
-            options.intra_op_num_threads = 2
+            import os
+            options.intra_op_num_threads = int(os.environ.get('VOICE_STUDIO_THREADS', '2'))
             options.inter_op_num_threads = 1
             options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
             # Sessions don't spin and compete for this laptop's two cores.
@@ -177,7 +184,7 @@ class SpeechEngine:
         return wav
 
     def synthesize(self, request, folder, progress, prepared=None):
-        started = time.monotonic()
+        started = active_time()
         chunks = split_text(request.get('text'))
         progress('Preparing the voice sample')
         sample, preview, digest = prepared or prepare_sample(
@@ -193,7 +200,7 @@ class SpeechEngine:
                 wav *= min(1, 0.98 / max(float(np.max(np.abs(wav))), 0.001))
                 output.write(wav)
                 if first_audio is None:
-                    first_audio = time.monotonic() - started
+                    first_audio = active_time() - started
                 # A closed, immutable preview is safe to play while the final WAV
                 # is still being written. Never serve the unfinished export.
                 part = folder / f'passage-{index+1}.wav'
@@ -203,6 +210,10 @@ class SpeechEngine:
         result = {'audio': str(audio_path), 'reference_preview': str(preview),
                   'duration': sf.info(audio_path).duration, 'passages': len(chunks),
                   'cached_voice': reused, 'first_audio_seconds': first_audio,
-                  'synthesis_seconds': time.monotonic()-started, 'model_revision': REVISION, 'precision': PRECISION}
+                  'synthesis_seconds': active_time()-started,
+                  'model_revision': getattr(self, 'revision', REVISION),
+                  'model': getattr(self, 'model_id', MODEL_ID),
+                  'precision': getattr(self, 'precision', PRECISION),
+                  'language': request.get('language', 'en'), 'text': request['text']}
         (folder / 'speech-metrics.json').write_text(json.dumps(result, indent=2), encoding='utf-8')
         return result

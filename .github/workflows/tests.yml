@@ -1,0 +1,54 @@
+name: Voice Studio checks
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      verify_container:
+        description: Build and start the Linux Docker image after unit checks
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    # The user authorizes free plans only. Private repositories can incur
+    # metered Actions charges; do not run this workflow on one automatically.
+    if: github.event.repository.private == false
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: pip
+          cache-dependency-path: requirements.lock.txt
+      - run: python -m pip install -r requirements.lock.txt
+      - run: python -m pytest -q
+      - run: python -c "import app; assert len(app.create_app().blocks) > 0"
+
+  container:
+    if: github.event.repository.private == false && github.event_name == 'workflow_dispatch' && inputs.verify_container
+    needs: unit
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t voice-studio:test .
+      - run: docker run -d --name voice-studio-test -p 127.0.0.1:7860:7860 voice-studio:test
+      - name: Verify server inside the actual container
+        run: |
+          for attempt in $(seq 1 60); do
+            if curl --fail http://127.0.0.1:7860/config; then exit 0; fi
+            sleep 2
+          done
+          docker logs voice-studio-test
+          exit 1
+      - if: always()
+        run: docker rm -f voice-studio-test || true

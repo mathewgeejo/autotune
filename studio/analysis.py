@@ -176,7 +176,7 @@ def align_same_words(reference, candidate):
 
 def normalize_text(text):
     text = unicodedata.normalize('NFC', text).casefold()
-    return ' '.join(''.join(ch if unicodedata.category(ch)[0] in 'LMN' else ' '
+    return ' '.join(''.join(ch if unicodedata.category(ch)[0] in 'LMN' or ch in '\u200c\u200d' else ' '
                             for ch in text).split())
 
 
@@ -241,6 +241,9 @@ def analyze_files(reference_path, output_path, folder, same_words=False):
     result['schema_version'] = 1
     target = folder/'analysis.json'
     target.write_text(json.dumps(result, indent=2, allow_nan=False), encoding='utf-8')
+    tracks = {f'{name}_{key}': value for name, profile in zip(('reference', 'output'), profiles)
+              for key, value in profile.items() if isinstance(value, np.ndarray)}
+    np.savez_compressed(folder/'analysis-tracks.npz', **tracks)
     csv_path = folder/'analysis-frames.csv'
     with csv_path.open('w', encoding='utf-8', newline='') as stream:
         fields = ['clip', 'time_seconds', 'pitch_hz', 'rms_dbfs', 'periodicity']
@@ -250,6 +253,12 @@ def analyze_files(reference_path, output_path, folder, same_words=False):
             for t, pitch, level, clarity in zip(profile['time'], profile['pitch_hz'], profile['rms_dbfs'], profile['periodicity']):
                 writer.writerow(dict(zip(fields, (name, float(t), float(pitch), float(level), float(clarity)))))
     return result, profiles, str(target), str(csv_path)
+
+
+def load_tracks(path):
+    with np.load(path, allow_pickle=False) as data:
+        return [{key.removeprefix(name+'_'): data[key] for key in data.files if key.startswith(name+'_')}
+                for name in ('reference', 'output')]
 
 
 def comparison_figure(profiles):
@@ -265,7 +274,8 @@ def comparison_figure(profiles):
             figure.add_trace(go.Scatter(x=x, y=y, name=name, legendgroup=name,
                 showlegend=row == 1, line={'color': color, 'width': 1.5}, connectgaps=False), row=row, col=1)
     figure.update_layout(height=690, template='plotly_dark', margin={'l': 45, 'r': 20, 't': 45, 'b': 25},
-                         paper_bgcolor='#151824', plot_bgcolor='#0f121d', hovermode='x unified')
+                         paper_bgcolor='#151824', plot_bgcolor='#0f121d', hovermode='x unified',
+                         legend={'orientation': 'h', 'x': 0, 'y': 1.06})
     figure.update_yaxes(title_text='Hz', row=1, col=1)
     figure.update_yaxes(title_text='dBFS', row=2, col=1)
     figure.update_yaxes(title_text='dB power', row=3, col=1)

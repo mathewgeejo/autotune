@@ -12,6 +12,7 @@ import uuid
 import psutil
 from studio.paths import JOBS, REFERENCES, DATA, ROOT
 from studio.processes import worker_options, stop_tree
+from studio.runtime import active_time, keep_awake
 
 
 class BusyError(ValueError):
@@ -47,14 +48,19 @@ class JobManager:
             text=True, encoding='utf-8', **worker_options())
 
     def submit(self, mode, payload):
-        if mode != 'clone':
-            raise ValueError('Choose voice cloning to generate speech from text.')
-        from studio.speech import split_text
-        split_text(payload.get('text'))
+        if mode not in ('clone', 'analyze'):
+            raise ValueError('Choose speech generation or audio comparison.')
+        payload = dict(payload)
+        if mode == 'clone':
+            from studio.speech import split_text
+            from studio.languages import resolve_language
+            split_text(payload.get('text'))
+            payload['language'] = resolve_language(payload.get('text', ''), payload.get('language', 'auto'))
+            if payload.get('quality', 'Detailed') not in ('Balanced', 'Detailed'):
+                raise ValueError('Choose Balanced or Detailed quality.')
         with self.lock:
             if self.active:
                 raise BusyError('Another generation is running. Wait for it to finish or cancel it first.')
-            payload = dict(payload)
             source = Path(payload.get('source') or '')
             if not source.is_file():
                 raise ValueError('Record or upload a voice sample first.')
@@ -67,12 +73,21 @@ class JobManager:
             try:
                 shutil.copy2(source, target)
                 payload['source'] = str(target)
+                if mode == 'analyze':
+                    comparison = Path(payload.get('comparison') or '')
+                    if not comparison.is_file():
+                        raise ValueError('Upload a comparison clip or generate speech first.')
+                    if comparison.stat().st_size > 150*1024**2:
+                        raise ValueError('Comparison audio must be smaller than 150 MB.')
+                    comparison_target = folder/('comparison'+comparison.suffix)
+                    shutil.copy2(comparison, comparison_target)
+                    payload['comparison'] = str(comparison_target)
                 request = folder / 'request.json'
                 request.write_text(json.dumps({'mode': mode, **payload}), encoding='utf-8')
                 (folder / 'worker.log').touch()
                 self._ensure_worker()
                 job = {'id': job_id, 'mode': mode, 'folder': folder, 'process': self.worker,
-                       'started': time.monotonic(), 'state': 'running', 'peak_mb': 0,
+                       'started': active_time(), 'state': 'running', 'peak_mb': 0,
                        'cancelled': False}
                 self.jobs[job_id] = job
                 self.active = job_id
@@ -88,6 +103,10 @@ class JobManager:
             return job_id
 
     def _watch(self, job_id):
+        with keep_awake():
+            self._watch_awake(job_id)
+
+    def _watch_awake(self, job_id):
         job = self.jobs[job_id]
         process = job['process']
         folder = job['folder']
@@ -102,7 +121,7 @@ class JobManager:
                 pass
             time.sleep(0.25)
         with self.lock:
-            job['elapsed'] = time.monotonic() - job['started']
+            job['elapsed'] = active_time() - job['started']
             try:
                 job['result'] = json.loads((folder / 'result.json').read_text(encoding='utf-8'))
             except (OSError, ValueError):
@@ -150,7 +169,7 @@ class JobManager:
             except (OSError, ValueError):
                 status = {'stage': 'Starting local voice cloning'}
             return {**job, 'status': status,
-                    'elapsed': job.get('elapsed', time.monotonic()-job['started'])}
+                    'elapsed': job.get('elapsed', active_time()-job['started'])}
 
     def clear(self, references=False):
         with self.lock:

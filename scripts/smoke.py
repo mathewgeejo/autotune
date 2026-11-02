@@ -14,14 +14,15 @@ sys.path.insert(0, str(ROOT))
 from studio.paths import configure
 configure()
 from studio.jobs import JobManager
+from studio.runtime import active_time
 import numpy as np
 import soundfile as sf
 
 
 def wait(manager, job_id, timeout=1800):
-    deadline = time.monotonic() + timeout
+    deadline = active_time() + timeout
     previous = None
-    while time.monotonic() < deadline:
+    while active_time() < deadline:
         job = manager.snapshot(job_id)
         message = job['status']['stage']
         if message != previous:
