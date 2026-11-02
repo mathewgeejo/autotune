@@ -45,3 +45,11 @@ The optional DNSMOS P.835 noise-quality proxy was calibrated on the natural refe
 The second Malayalam reference hit a Windows `PermissionError` replacing `status.json` after 30 diffusion steps. It was a progress-file race, not a measured synthesis-quality failure. Atomic JSON writes now retry transient locks, and an advisory status update cannot discard the audio request. Result/failure files remain strict. Both focused regression checks pass; the failed job `34fc1e04f2494d238968089554f14190` is retained for diagnosis.
 
 Stronger-model investigation: the public IndicF5 ONNX DiT export at `developerabu/IndicF5-ONNX@8886363d9473330618a458b119d5d8bd95ffccba` has fixed `[1,128,100]` audio/conditioning and `[1,128]` text inputs. That cannot directly represent normal 3–10-second references. It has not been substituted into the working engine or counted as a successful clone.
+
+## Broader reference coverage
+
+The retry on the second FLEURS recording completes after the status-lock fix: zero recognized content errors, independent speaker cosine **0.9193**, 212.3-second request, and about 1,048 MB peak worker RSS. Its same-recording half-to-half control is only 0.4257, another reason to avoid a universal cosine cutoff. Evidence: `data/quality/ml-second-reference-retry.json`.
+
+Two additional Malayalam recordings from OpenSLR SLR63's male archive are now collected, with different anonymized filename groups. They were selected by duration and group, not synthesis scores. HTTP byte ranges fetched 4.31 MB instead of the full 635.66 MB ZIP; per-file hashes and CC-BY-SA attribution are retained in `data/quality/corpus/openslr63-male/manifest.json`. Filename groups are an inference about recording structure, not independent proof of speaker identity.
+
+The regression suite now passes **31 tests**. Checkpoints are pushed to `mathewgeejo/autotune`; no application builds or deployment work are part of this quality iteration.

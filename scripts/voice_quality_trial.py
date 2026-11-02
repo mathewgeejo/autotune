@@ -20,15 +20,21 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--reference', required=True, type=Path)
     parser.add_argument('--reference-text', type=Path)
-    parser.add_argument('--text', required=True)
+    words = parser.add_mutually_exclusive_group(required=True)
+    words.add_argument('--text')
+    words.add_argument('--text-file', type=Path)
     parser.add_argument('--language', choices=['en', 'ml'], required=True)
     parser.add_argument('--baseline', type=Path)
     parser.add_argument('--baseline-reference', type=Path)
     parser.add_argument('--output', required=True, type=Path)
     args = parser.parse_args()
+    if args.text_file:
+        args.text = args.text_file.read_text(encoding='utf-8')
+    reference_text = args.reference_text.read_text(encoding='utf-8') if args.reference_text else ''
     args.output.parent.mkdir(parents=True, exist_ok=True)
     report = {'language': args.language, 'expected': args.text,
               'source_reference': str(args.reference.resolve()),
+              'reference_text': reference_text,
               'git_revision': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip(),
               'status': 'running',
               'interpretation': 'Short automated comparisons are not proof of human indistinguishability.'}
@@ -41,7 +47,7 @@ def main():
     with keep_awake():
         try:
             job_id = manager.submit('clone', {'source': str(args.reference.resolve()), 'text': args.text,
-                'reference_text': args.reference_text.read_text(encoding='utf-8') if args.reference_text else '',
+                'reference_text': reference_text,
                 'language': args.language, 'quality': 'Detailed'})
             report['job_id'] = job_id
             save()
@@ -75,6 +81,9 @@ def main():
         report['same_human_different_words_control'] = speaker_similarity(folder/'human-first.wav',
             folder/'human-second.wav', folder, progress)
         report['candidate_audit'] = full_audit(clean, result['audio'], args.text, folder, args.language, progress)
+        from studio.analysis import normalize_text, analyze_files
+        if reference_text and normalize_text(reference_text) == normalize_text(args.text):
+            report['same_words_acoustics'], _, _, _ = analyze_files(clean, result['audio'], folder/'same-words', same_words=True)
         report['status'] = 'measured'
         save()
         summary = {key: report[key] for key in ('job_id', 'language', 'elapsed_seconds', 'peak_worker_mb', 'selection')}
