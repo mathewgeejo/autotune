@@ -6,6 +6,9 @@ import json
 import os
 from pathlib import Path
 import sys
+from types import MethodType
+
+import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -17,6 +20,20 @@ from studio.runtime import keep_awake
 from studio.speech import prepare_sample
 
 
+def legacy_text_conditioning(self, text, prompt_tokens, prompt_length):
+    """Pre-experiment duration control, retained for a fair audio comparison."""
+    feeds = {'tokens': self.text_ids(text), 'prompt_tokens': prompt_tokens,
+             'prompt_features_len': np.array(prompt_length, dtype=np.int64),
+             'speed': np.array(1.0, dtype=np.float32)}
+    condition = self.text_encoder.run(None, feeds)[0].astype(np.float32)
+    if self.speed != 1.0:
+        total = condition.shape[1]
+        desired = prompt_length+(total-prompt_length)/self.speed
+        feeds['speed'] = np.array(total/desired, dtype=np.float32)
+        condition = self.text_encoder.run(None, feeds)[0].astype(np.float32)
+    return condition
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--baseline-report', type=Path, required=True)
@@ -24,6 +41,8 @@ def main():
     parser.add_argument('--guidance', type=float, nargs='+', default=[2.0])
     parser.add_argument('--speed', type=float, nargs='+', default=[1.0])
     parser.add_argument('--accelerator', choices=['cpu', 'intel'], default='cpu')
+    parser.add_argument('--timing-mode', choices=['production', 'legacy'], default='production',
+                        help='Compare current target-frame rate control with the previous graph duration method.')
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
     if args.output.exists():
@@ -44,6 +63,7 @@ def main():
     report = {'baseline_report': str(args.baseline_report),
               'comparison': 'Fixed reference, text, FP32 weights and seed 666; record steps, guidance, speed and actual backend for each trial.',
               'requested_accelerator': args.accelerator,
+              'timing_mode': args.timing_mode,
               'baseline_precision': baseline['result']['precision'],
               'scope': 'Automated engineering comparison; perceptual equivalence remains unproven.', 'trials': []}
     if 'natural_content_control' in baseline:
@@ -53,6 +73,8 @@ def main():
     progress = lambda message, **kwargs: print(message, flush=True)
     with keep_awake():
         engine = IndicEngine(progress, 'Detailed')
+        if args.timing_mode == 'legacy':
+            engine.text_conditioning = MethodType(legacy_text_conditioning, engine)
         for steps in args.steps:
             for guidance in args.guidance:
                 for speed in args.speed:
