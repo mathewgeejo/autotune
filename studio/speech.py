@@ -133,6 +133,7 @@ class SpeechEngine:
         return values, False
 
     def generate_chunk(self, text, voice, progress):
+        composing_started = active_time()
         cond, prompt, embedding, features = voice
         language = self.sessions['language_model']
         ids = np.array([self.tokenizer.encode(text).ids], dtype=np.int64)
@@ -176,11 +177,15 @@ class SpeechEngine:
         speech_tokens = np.concatenate((prompt, np.array([tokens[1:]], dtype=np.int64),
                                        np.full((batch, 3), SILENCE_TOKEN, dtype=np.int64)), axis=1)
         progress('Rendering the speech waveform')
+        decoder_started = active_time()
         wav = self.sessions['conditional_decoder'].run(None, {
             'speech_tokens': speech_tokens, 'speaker_embeddings': embedding,
             'speaker_features': features})[0].reshape(-1)
         if not len(wav) or not np.isfinite(wav).all() or np.max(np.abs(wav)) < 0.001:
             raise AudioError('The voice model returned empty audio. Try another clear speech sample.')
+        self.last_chunk_metrics = {'language_model_seconds': decoder_started-composing_started,
+                                   'waveform_decoder_seconds': active_time()-decoder_started,
+                                   'speech_tokens': len(tokens)-1, 'samples': len(wav)}
         return wav
 
     def synthesize(self, request, folder, progress, prepared=None):
@@ -192,11 +197,13 @@ class SpeechEngine:
         voice, reused = self.conditioning(sample, digest, progress)
         audio_path = folder / 'speech.wav'
         first_audio = None
+        chunk_metrics = []
         with sf.SoundFile(audio_path, 'w', samplerate=RATE, channels=1, subtype='PCM_16') as output:
             for index, text in enumerate(chunks):
                 def report(message):
                     progress(f'Passage {index+1}/{len(chunks)}: {message}')
                 wav = self.generate_chunk(text, voice, report)
+                chunk_metrics.append(dict(getattr(self, 'last_chunk_metrics', {})))
                 wav *= min(1, 0.98 / max(float(np.max(np.abs(wav))), 0.001))
                 output.write(wav)
                 if first_audio is None:
@@ -214,6 +221,7 @@ class SpeechEngine:
                   'model_revision': getattr(self, 'revision', REVISION),
                   'model': getattr(self, 'model_id', MODEL_ID),
                   'precision': getattr(self, 'precision', PRECISION),
-                  'language': request.get('language', 'en'), 'text': request['text']}
+                  'language': request.get('language', 'en'), 'text': request['text'],
+                  'chunk_timings': chunk_metrics}
         (folder / 'speech-metrics.json').write_text(json.dumps(result, indent=2), encoding='utf-8')
         return result

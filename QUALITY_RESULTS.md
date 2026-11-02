@@ -53,3 +53,5 @@ The retry on the second FLEURS recording completes after the status-lock fix: ze
 Two additional Malayalam recordings from OpenSLR SLR63's male archive are now collected, with different anonymized filename groups. They were selected by duration and group, not synthesis scores. HTTP byte ranges fetched 4.31 MB instead of the full 635.66 MB ZIP; per-file hashes and CC-BY-SA attribution are retained in `data/quality/corpus/openslr63-male/manifest.json`. Filename groups are an inference about recording structure, not independent proof of speaker identity.
 
 The regression suite now passes **31 tests**. Checkpoints are pushed to `mathewgeejo/autotune`; no application builds or deployment work are part of this quality iteration.
+
+Per-passage stage timings are now recorded in `speech-metrics.json`: English language-model versus waveform-decoder time; Indic text-conditioning, flow, and waveform-decoder time. This adds measurement without changing sampling or inference precision. Seven relevant speech/Indic checks and Ruff correctness checks pass. Additional male-archive and Jo English comparisons are underway.

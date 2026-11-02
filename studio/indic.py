@@ -13,6 +13,7 @@ from studio.audio import AudioError
 from studio.models import download_indic_models, INDIC_REVISION, INDIC_ID
 from studio.paths import REFERENCES
 from studio.speech import SpeechEngine
+from studio.runtime import active_time
 
 
 def session(path):
@@ -151,6 +152,7 @@ class IndicEngine(SpeechEngine):
         return condition
 
     def generate_chunk(self, text, voice, progress):
+        text_started = active_time()
         features, prompt_tokens, original_rms = voice
         prompt_length = features.shape[1]
         text_condition = self.text_conditioning(text, prompt_tokens, prompt_length)
@@ -162,12 +164,14 @@ class IndicEngine(SpeechEngine):
         conditioning[:, :prompt_length] = features
         schedule = np.linspace(0, 1, self.steps+1, dtype=np.float32)
         schedule = 0.5*schedule/(1-0.5*schedule)
+        flow_started = active_time()
         for step in range(self.steps):
             progress(f'Refining pronunciation and tone: {step+1}/{self.steps}')
             velocity = self.flow_decoder.run(None, {'t': np.array(schedule[step], dtype=np.float32),
                 'x': noise, 'text_condition': text_condition, 'speech_condition': conditioning,
                 'guidance_scale': np.array(self.guidance_scale, dtype=np.float32)})[0]
             noise += velocity*(schedule[step+1]-schedule[step])
+        vocoder_started = active_time()
         mel = noise[:, prompt_length:].transpose(0, 2, 1)/0.1
         progress('Rendering the speech waveform')
         vocoder_input = self.vocoder.get_inputs()[0].name
@@ -181,6 +185,9 @@ class IndicEngine(SpeechEngine):
             audio *= original_rms/0.1
         if not len(audio) or not np.isfinite(audio).all() or np.max(np.abs(audio)) < 0.001:
             raise AudioError('The Indic model returned empty audio. Check the reference and transcript.')
+        self.last_chunk_metrics = {'text_condition_seconds': flow_started-text_started,
+            'flow_seconds': vocoder_started-flow_started, 'waveform_decoder_seconds': active_time()-vocoder_started,
+            'flow_steps': self.steps, 'samples': len(audio)}
         return audio.astype(np.float32)
 
     def synthesize(self, request, folder, progress, prepared=None):
