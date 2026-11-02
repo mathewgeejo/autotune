@@ -50,3 +50,26 @@ def best_reference(path, seconds=10):
     scores = np.convolve(np.minimum(energy, np.percentile(energy, 85)), np.ones(width)/width, mode='valid')
     start = int(np.argmax(scores)) / 5
     return start, min(seconds, len(mono)/rate-start), len(mono)/rate
+
+
+def reference_activity(mono, rate):
+    """Exclude isolated boundary clicks from the speech region, preserving phones."""
+    frame = int(0.02*rate)
+    frames = mono[:len(mono)//frame*frame].reshape(-1, frame)
+    rms = np.sqrt(np.mean(frames*frames, axis=1))
+    active = rms > max(0.003, float(rms.max())*0.04)
+    runs = np.flatnonzero(np.diff(np.r_[False, active, False].astype(int))).reshape(-1, 2)
+    removed = []
+    if len(runs) >= 2 and len(mono) > rate:
+        body = mono[int(0.2*rate):-int(0.2*rate)]
+        threshold = max(0.04, float(np.quantile(np.abs(body), 0.995))*6)
+        for position, neighbor in [(0, 1), (-1, -2)]:
+            start, end = runs[position]
+            at_edge = start < 2 if position == 0 else end > len(frames)-2
+            gap = runs[neighbor, 0]-end if position == 0 else start-runs[neighbor, 1]
+            peak = float(np.max(np.abs(frames[start:end])))
+            if at_edge and end-start <= 2 and gap >= 5 and peak > threshold:
+                active[start:end] = False
+                removed.append({'start_seconds': float(start*0.02), 'end_seconds': float(end*0.02),
+                                'reason': 'Isolated high-amplitude boundary transient separated from speech'})
+    return active, removed

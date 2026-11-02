@@ -12,7 +12,7 @@ from pathlib import Path
 import numpy as np
 import soundfile as sf
 
-from studio.audio import AudioError, decode, validate_signal, best_reference
+from studio.audio import AudioError, decode, validate_signal, best_reference, reference_activity
 from studio.models import REVISION, PRECISION, MODEL_ID, download_models
 from studio.paths import REFERENCES
 from studio.runtime import active_time
@@ -70,9 +70,8 @@ def prepare_sample(source, folder, start=0, end=0):
     selected_start, length, _ = best_reference(decoded, seconds=10)
     mono = samples[int(selected_start*rate):int((selected_start+length)*rate), 0]
     # Trim only edge silence, preserving natural pauses inside the sample.
-    frame = int(0.02 * rate)
-    rms = np.sqrt(np.mean(mono[:len(mono)//frame*frame].reshape(-1, frame)**2, axis=1))
-    active = np.flatnonzero(rms > max(0.003, float(rms.max()) * 0.04))
+    activity, edge_transients = reference_activity(mono, rate)
+    active = np.flatnonzero(activity)
     if not len(active) or len(active)*0.02 < 2:
         raise AudioError('The sample needs at least two seconds of clear, continuous speech.')
     left = max(0, int((active[0]*0.02-0.12)*rate))
@@ -86,7 +85,8 @@ def prepare_sample(source, folder, start=0, end=0):
         'uploaded_selection_seconds': len(samples)/rate,
         'used_start_seconds': start+selected_start+left/rate,
         'used_duration_seconds': len(mono)/rate,
-        'conditioning_limit_seconds': 10}), encoding='utf-8')
+        'conditioning_limit_seconds': 10,
+        'excluded_edge_transients': edge_transients}), encoding='utf-8')
     digest = hashlib.sha256(preview.read_bytes() + REVISION.encode() + b'conditioning-v1').hexdigest()
     return mono[np.newaxis].astype(np.float32), preview, digest
 
