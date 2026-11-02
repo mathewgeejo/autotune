@@ -86,7 +86,11 @@ def main():
     source = ROOT/'.tools/indic-f5-source'
     checkpoint = MODELS/'experimental-f5'/model_revision/'model.safetensors'
     download = json.loads(checkpoint.with_name('download.json').read_text(encoding='utf-8'))
-    if download['status'] != 'verified' or not checkpoint.is_file():
+    expected_hash = ('23d5cd75f5b52b54bd04efe39f871900146fa7123ae2c42fe5a38d04c7025738'
+                     if args.model == 'dhee' else 'ba7f3671180fb7784e24bd1dafc96e729a38ce02e7f6d3877cdef32525a1865c')
+    if (download['status'] != 'verified' or not checkpoint.is_file() or
+            download['model'] != model_id or download['revision'] != model_revision or
+            download['sha256'] != expected_hash or checkpoint.stat().st_size != download['bytes']):
         raise RuntimeError('Wait for the checkpoint download and full SHA256 verification.')
     vocab_path = MODELS/'huggingface/hub/models--Anjan9320--IndicF5/snapshots'/VOCAB_REVISION/'checkpoints/vocab.txt'
     folder = args.output.parent/args.output.stem
