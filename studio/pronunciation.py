@@ -5,6 +5,7 @@ entering this function; each recognizer/verifier releases its model on return.
 """
 import gc
 
+from studio.accelerators import WarmShapeFlow
 from studio.runtime import active_time
 from studio.voice_selection import compare_reading
 
@@ -48,8 +49,16 @@ def check_pronunciation(request, folder, prepared, default_result, progress, wri
                     engine = IndicEngine(progress, 'Detailed')
                     engine.guidance_scale = 3.0
                     engine.precision = {**engine.precision, 'guidance_scale': 3.0}
+                    if getattr(engine.flow_decoder, 'backend', '').startswith('openvino'):
+                        engine.flow_decoder = WarmShapeFlow(engine.flow_decoder)
+                        engine.precision['gpu_shape_warmup_evaluations'] = 3
                     candidate = engine.synthesize({**request, 'quality': 'Detailed'}, retry_folder,
                                                   progress, prepared=prepared)
+                    if isinstance(engine.flow_decoder, WarmShapeFlow):
+                        report['retry_gpu_warmup'] = {
+                            'extra_evaluations': engine.flow_decoder.extra_evaluations,
+                            'elapsed_seconds': engine.flow_decoder.warmup_seconds,
+                            'shapes': sorted(engine.flow_decoder.shapes)}
                 finally:
                     engine = None
                     gc.collect()

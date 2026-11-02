@@ -10,6 +10,39 @@ from studio.paths import MODELS
 from studio.runtime import active_time
 
 
+class WarmShapeFlow:
+    """Warm a new GPU shape without advancing or modifying the solver input.
+
+    Dynamic GPU kernels can change after their first evaluation. Three repeated
+    evaluations reproduced the established warm reading in two fresh processes.
+    Ordinary CPU inference is left alone, including a fallback during warm-up.
+    """
+    def __init__(self, flow, evaluations=3):
+        if evaluations < 1:
+            raise ValueError('At least one evaluation is required')
+        self.flow, self.evaluations, self.shapes = flow, evaluations, set()
+        self.warmup_seconds = 0.0
+        self.extra_evaluations = 0
+
+    @property
+    def backend(self):
+        return getattr(self.flow, 'backend', 'onnxruntime-cpu')
+
+    def run(self, output_names, feeds):
+        shape = tuple(feeds['x'].shape)
+        if shape not in self.shapes and self.backend.startswith('openvino'):
+            started = active_time()
+            self.shapes.add(shape)
+            for _ in range(self.evaluations-1):
+                value = self.flow.run(output_names, feeds)
+                if not self.backend.startswith('openvino'):
+                    self.warmup_seconds += active_time()-started
+                    return value
+                self.extra_evaluations += 1
+            self.warmup_seconds += active_time()-started
+        return self.flow.run(output_names, feeds)
+
+
 class IntelFlowSession:
     backend = 'openvino-intel-gpu-fp32'
 

@@ -1,4 +1,5 @@
 from pathlib import Path
+from types import SimpleNamespace
 import weakref
 
 import pytest
@@ -50,12 +51,19 @@ def test_retry_requires_word_gain_and_retains_actual_selected_metadata(tmp_path,
     monkeypatch.setattr(recognition, 'recognize', lambda *args: original['transcription'])
     monkeypatch.setattr(recognition, 'content_comparison', lambda *args: original['content_comparison'])
     monkeypatch.setattr(recognition, 'speaker_similarity', lambda *args: original['speaker_verification'])
-    monkeypatch.setattr(recognition, 'full_audit', lambda *args: audit(.25, .04, candidate_speaker))
+    flow_refs = []
+    def retry_check(*args):
+        assert flow_refs[0]() is None, 'Warm-up wrapper must not retain the GPU model during checking'
+        return audit(.25, .04, candidate_speaker)
+    monkeypatch.setattr(recognition, 'full_audit', retry_check)
     class Engine:
         def __init__(self, *args):
             self.precision = {'guidance_scale': 2}
+            self.flow_decoder = SimpleNamespace(backend='openvino-intel-gpu-fp32')
         def synthesize(self, request, folder, progress, prepared=None):
             assert self.guidance_scale == 3
+            assert self.flow_decoder.evaluations == 3
+            flow_refs.append(weakref.ref(self.flow_decoder))
             return {'audio': str(folder/'speech.wav'), 'reference_preview': str(tmp_path/'reference.wav'),
                     'synthesis_seconds': 90, 'precision': dict(self.precision)}
     monkeypatch.setattr(indic, 'IndicEngine', Engine)
@@ -65,6 +73,7 @@ def test_retry_requires_word_gain_and_retains_actual_selected_metadata(tmp_path,
     assert result['precision']['guidance_scale'] == (3 if selected == 'retry' else 2)
     assert Path(result['audio']).parent == (tmp_path/'pronunciation-retry' if selected == 'retry' else tmp_path)
     assert result['word_check']['render_synthesis_seconds'] == 170
+    assert result['word_check']['candidate_precision']['gpu_shape_warmup_evaluations'] == 3
 
 
 @pytest.mark.parametrize('failure_stage', ['render', 'retry-check'])
@@ -77,6 +86,7 @@ def test_failed_retry_keeps_the_default_and_releases_its_engine(tmp_path, monkey
     class Engine:
         def __init__(self, *args):
             self.precision = {}
+            self.flow_decoder = object()
             refs.append(weakref.ref(self))
         def synthesize(self, request, folder, progress, prepared=None):
             if failure_stage == 'render':

@@ -53,3 +53,43 @@ def test_gpu_output_is_owned_and_failed_step_retries_on_cpu(tmp_path, monkeypatc
     assert retries[0].tolist() == value.tolist() == [3.0]
     assert session.backend == 'onnxruntime-cpu-after-intel-fallback'
     assert session.run(None, {'x':value})[0].tolist() == [6.0]
+
+
+def test_shape_warmup_repeats_identical_inputs_and_advances_with_only_last_output():
+    calls = []
+    class Flow:
+        backend = 'openvino-intel-gpu-fp32'
+        def run(self, names, feeds):
+            calls.append(feeds['x'].copy())
+            return [np.full_like(feeds['x'], len(calls))]
+    session = accelerators.WarmShapeFlow(Flow())
+    value = np.array([[3.0, 4.0]], dtype=np.float32)
+    first = session.run(None, {'x':value})[0]
+    assert first.tolist() == [[3.0, 3.0]]
+    assert all(np.array_equal(item, value) for item in calls)
+    assert value.tolist() == [[3.0, 4.0]]
+    assert session.run(None, {'x':value})[0].tolist() == [[4.0, 4.0]]
+    assert session.run(None, {'x':np.ones((1, 3), dtype=np.float32)})[0].tolist() == [[7.0]*3]
+    assert session.extra_evaluations == 4
+    assert session.shapes == {(1, 2), (1, 3)}
+
+
+@pytest.mark.parametrize('initial_backend,fallback_call,expected_calls', [
+    ('onnxruntime-cpu', None, 1), ('openvino-intel-gpu-fp32', 1, 1),
+    ('openvino-intel-gpu-fp32', 2, 2)])
+def test_shape_warmup_skips_cpu_and_returns_the_same_step_after_fallback(initial_backend, fallback_call, expected_calls):
+    class Flow:
+        backend = initial_backend
+        calls = 0
+        def run(self, names, feeds):
+            self.calls += 1
+            if self.calls == fallback_call:
+                self.backend = 'onnxruntime-cpu-after-intel-fallback'
+            return [feeds['x']*2]
+    flow = Flow()
+    session = accelerators.WarmShapeFlow(flow)
+    value = np.array([3.0], dtype=np.float32)
+    assert session.run(None, {'x':value})[0].tolist() == [6.0]
+    assert flow.calls == expected_calls
+    assert session.backend == flow.backend
+    assert value.tolist() == [3.0]
