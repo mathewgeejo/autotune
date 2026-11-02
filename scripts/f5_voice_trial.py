@@ -7,11 +7,13 @@ import argparse
 import gc
 import hashlib
 import importlib.machinery
+import importlib.util
 import json
 from pathlib import Path
 import shutil
 import subprocess
 import sys
+import threading
 from types import ModuleType
 import unicodedata
 
@@ -34,6 +36,22 @@ def inference_modules(source):
         package.__path__ = [str(directory)]
         package.__spec__ = importlib.machinery.ModuleSpec(name, loader=None, is_package=True)
         sys.modules[name] = package
+    # Vocos inference does not use the BigVGAN mel path. Defer its optional
+    # librosa import, retaining that path's original function when requested.
+    path = source/'f5_tts/model/modules.py'
+    original = path.read_text(encoding='utf-8')
+    eager = 'from librosa.filters import mel as librosa_mel_fn'
+    if original.count(eager) != 1:
+        raise RuntimeError('The pinned F5 module import contract changed')
+    adapted = original.replace(eager, 'def librosa_mel_fn(*args, **kwargs):\n'
+        '    from librosa.filters import mel\n    return mel(*args, **kwargs)')
+    name = 'f5_tts.model.modules'
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    exec(compile(adapted, str(path), 'exec'), module.__dict__)
+    return {'adaptation': 'Lazy unused BigVGAN librosa import; model arithmetic unchanged',
+            'original_modules_sha256': hashlib.sha256(original.encode('utf-8')).hexdigest()}
 
 
 def main():
@@ -74,13 +92,23 @@ def main():
         temporary.write_text(json.dumps(report, indent=2, ensure_ascii=False, allow_nan=False), encoding='utf-8')
         temporary.replace(args.output)
     save()
+    import psutil
+    stop_memory = threading.Event()
+    peak_bytes = [0]
+    def sample_memory():
+        process = psutil.Process()
+        while not stop_memory.is_set():
+            peak_bytes[0] = max(peak_bytes[0], process.memory_info().rss)
+            stop_memory.wait(0.5)
+    memory_thread = threading.Thread(target=sample_memory, daemon=True)
+    memory_thread.start()
     with keep_awake():
         try:
             import numpy as np
             import soundfile as sf
             import torch
             from safetensors import safe_open
-            inference_modules(source)
+            report['source_import_adapter'] = inference_modules(source)
             from f5_tts.model.backbones.dit import DiT
             from f5_tts.model.cfm import CFM
             from f5_tts.model.modules import precompute_freqs_cis
@@ -93,7 +121,7 @@ def main():
             with torch.device('meta'):
                 transformer = DiT(dim=1024, depth=22, heads=16, ff_mult=2, text_dim=512,
                                   conv_layers=4, text_num_embeds=vocab_size, mel_dim=100)
-            with safe_open(checkpoint, framework='pt', device='cpu') as archive:
+            with safe_open(str(checkpoint), framework='pt', device='cpu') as archive:
                 state = {key.removeprefix('ema_model.transformer.'): archive.get_tensor(key)
                          for key in archive.keys() if key.startswith('ema_model.transformer.')}
             transformer.load_state_dict(state, strict=True, assign=True)
@@ -156,7 +184,7 @@ def main():
             vocoder = Vocos(feature_extractor=MelSpectrogramFeatures(sample_rate=24000, n_fft=1024,
                 hop_length=256, n_mels=100), backbone=VocosBackbone(input_channels=100, dim=512,
                 intermediate_dim=1536, num_layers=8), head=ISTFTHead(dim=512, n_fft=1024, hop_length=256, padding='same'))
-            with safe_open(checkpoint, framework='pt', device='cpu') as archive:
+            with safe_open(str(checkpoint), framework='pt', device='cpu') as archive:
                 state = {key.removeprefix('vocoder.'): archive.get_tensor(key)
                          for key in archive.keys() if key.startswith('vocoder.')}
             vocoder.load_state_dict(state, strict=True)
@@ -182,6 +210,11 @@ def main():
             report.update(status='failed', error=f'{type(exc).__name__}: {exc}')
             save()
             raise
+        finally:
+            stop_memory.set()
+            memory_thread.join(timeout=2)
+            report['peak_worker_mb'] = peak_bytes[0]/1024**2
+            save()
 
 
 if __name__ == '__main__':

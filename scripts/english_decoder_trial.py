@@ -90,6 +90,7 @@ def main():
     parser.add_argument('--capture-report', type=Path, help='Reuse completed CPU captures in a new report without resynthesizing.')
     parser.add_argument('--static-shapes', action='store_true', help='Specialize the GPU graph to the captured single-passage input shapes.')
     parser.add_argument('--device', choices=['GPU', 'CPU'], default='GPU')
+    parser.add_argument('--capture-only', action='store_true', help='Save original CPU inputs/output and exit before backend experiments.')
     args = parser.parse_args()
     if args.output.exists():
         parser.error('Use a fresh output path to preserve prior measurements.')
@@ -136,6 +137,10 @@ def main():
                                            cpu_folder, progress, prepared)
                 report.update(cpu_result=result, captured_passages=capture.calls)
                 save()
+                if args.capture_only:
+                    report['status'] = 'captured'
+                    save()
+                    return
                 # Retain only this decoder for repeated-CPU controls.
                 engine.sessions.clear()
                 del engine

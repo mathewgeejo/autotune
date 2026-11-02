@@ -1,0 +1,16 @@
+# Isolated quality experiment only; never install into the production .venv.
+# Torch CPU wheels: https://download.pytorch.org/whl/cpu
+# The experiment reuses the app's general dependencies through a read-only .pth.
+torch==2.4.1+cpu
+torchaudio==2.4.1+cpu
+networkx==3.4.2
+x-transformers==1.31.14
+einops==0.8.1
+einx==0.3.0
+frozendict==2.4.6
+torchdiffeq==0.2.5
+jieba==0.42.1
+pypinyin==0.53.0
+safetensors==0.4.5
+vocos==0.1.0
+encodec==0.1.1
