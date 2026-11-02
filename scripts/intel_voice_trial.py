@@ -3,6 +3,7 @@ import argparse
 import gc
 import hashlib
 import json
+import os
 from pathlib import Path
 import sys
 
@@ -11,6 +12,9 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT/'.tools/openvino-runtime'))
 from studio.paths import configure, MODELS
 configure()
+# This benchmark replaces the flow session explicitly after loading the other
+# CPU components, regardless of production auto-selection settings.
+os.environ['VOICE_STUDIO_ACCELERATOR'] = 'cpu'
 from studio.indic import IndicEngine
 from studio.models import download_indic_models
 from studio.recognition import full_audit

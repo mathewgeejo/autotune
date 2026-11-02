@@ -71,7 +71,12 @@ class IndicEngine(SpeechEngine):
         root = download_indic_models(quality, progress)
         progress('Loading native-script text and voice models')
         self.text_encoder = session(root/f'text_encoder{suffix}.onnx')
-        self.flow_decoder = session(root/f'fm_decoder{suffix}.onnx')
+        if quality == 'Detailed':
+            from studio.accelerators import flow_session
+            self.flow_decoder = flow_session(root/'fm_decoder.onnx', progress, session)
+        else:
+            self.flow_decoder = session(root/f'fm_decoder{suffix}.onnx')
+        self.precision['flow_backend'] = getattr(self.flow_decoder, 'backend', 'onnxruntime-cpu')
         self.vocoder = session(root/'vocoder_backbone.onnx')
         with np.load(root/'mel_fb.npz', allow_pickle=False) as data:
             self.filters, self.window = data['fb'].astype(np.float32), data['window'].astype(np.float32)
@@ -185,9 +190,10 @@ class IndicEngine(SpeechEngine):
             audio *= original_rms/0.1
         if not len(audio) or not np.isfinite(audio).all() or np.max(np.abs(audio)) < 0.001:
             raise AudioError('The Indic model returned empty audio. Check the reference and transcript.')
+        self.precision['flow_backend'] = getattr(self.flow_decoder, 'backend', 'onnxruntime-cpu')
         self.last_chunk_metrics = {'text_condition_seconds': flow_started-text_started,
             'flow_seconds': vocoder_started-flow_started, 'waveform_decoder_seconds': active_time()-vocoder_started,
-            'flow_steps': self.steps, 'samples': len(audio)}
+            'flow_steps': self.steps, 'flow_backend': self.precision['flow_backend'], 'samples': len(audio)}
         return audio.astype(np.float32)
 
     def synthesize(self, request, folder, progress, prepared=None):

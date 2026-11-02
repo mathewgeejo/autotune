@@ -2,6 +2,8 @@
 
 This is the current priority. Deployment and Docker work are deferred. These measurements do not establish human indistinguishability.
 
+Current candidate integration: optional Intel GPU acceleration for Detailed Indic flow, with automatic CPU fallback and the original FP32/32-step settings. The optional runtime is installed on this workstation. Normal-worker and longer-passage validation is in progress; English remains on its existing engine.
+
 ## 2 November: reference transient and fair Malayalam comparison
 
 The original Malayalam FLEURS recording contains an isolated peak at 9 ms, separated from speech by a long quiet interval. It constrained reference normalization and the independent verifier's input level. The new selector excludes isolated, extreme boundary transients while preserving speech and interior pauses. It does not denoise or pitch-shift the voice.
@@ -70,3 +72,5 @@ The full Intel FP32 trial completed: 23.8 seconds to compile, 96.3 seconds for t
 Independent quality guards remain close for this case: GPU DNSMOS overall 3.170 versus CPU 3.207; GPU UTMOS predicted MOS 3.084 versus CPU 3.071. Both are learned proxies, not human ratings. UTMOS correctly penalizes controlled noise and hard clipping on the English control (natural 3.773, noise 1.413, clipping 1.253). The natural Malayalam reference scores only 2.329, while the generated clip scores 3.071: source quality and language-domain effects make universal predicted-MOS cutoffs inappropriate. Jo's generated English scores 4.175. Evidence: `data/quality/utmos-calibration.json` and `data/quality/ml-intel-noise-quality.json`.
 
 Production remains on CPU pending another voice and longer-passage acceleration checks. The experimental runtime stays optional and preserves the existing 32-step/full-precision quality settings.
+
+The additional male-archive Intel trial completed: warm synthesis **50.7 seconds** versus CPU 102.3 seconds; speaker cosine 0.9044 versus CPU 0.9298, zero recognized content errors, CPU/GPU waveform correlation 0.9998. Cached compilation took 2.4 seconds. The optional backend now has CPU-only/unavailable-device checks, owned-output checks, and a failed-step CPU retry check. The complete regression suite passes **37 tests**. Normal-worker tests are the next integration gate. Evidence: `data/quality/ml-male-intel-fp32.json`.

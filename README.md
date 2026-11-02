@@ -31,6 +31,8 @@ After the selected models are downloaded, file-based processing works offline. D
 
 The complete model set needs approximately 6.5 GB of storage, plus dependencies and recordings. Individual options `--language ml --quality Detailed` and `--audit` avoid downloading everything. Set `HF_HUB_OFFLINE=1` after caching to forbid model-network lookups.
 
+Malayalam/Hindi Detailed mode can optionally use an Intel GPU through `requirements-intel.txt`. Install that optional runtime with `.venv/Scripts/python.exe -m pip install -r requirements-intel.txt`. `VOICE_STUDIO_ACCELERATOR=auto` (the default) selects a compatible Intel GPU when the package is installed; `cpu` forces the existing CPU path. Acceleration retains the FP32 model and 32 steps, caches compilation, and falls back to CPU if initialization or a refinement step fails. English and Balanced mode retain their existing engines. First-use compilation takes extra time, and performance depends on the device. This optional path is undergoing broader voice-quality checks; see [QUALITY_RESULTS.md](QUALITY_RESULTS.md).
+
 All audio processing runs on the host. The app listens on localhost by default and does not create a public sharing link. Audio samples are never sent to a speech service. Downloads contact Hugging Face for model files.
 
 ## Compare and debug
