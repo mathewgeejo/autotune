@@ -67,7 +67,8 @@ class IndicEngine(SpeechEngine):
         suffix = '' if quality == 'Detailed' else '_int8'
         self.precision = {'text_encoder': 'fp32' if not suffix else 'int8',
                           'flow_decoder': 'fp32' if not suffix else 'int8', 'steps': self.steps,
-                          'guidance_scale': self.guidance_scale, 'speed': self.speed}
+                          'guidance_scale': self.guidance_scale, 'speed': self.speed,
+                          'rate_control': 'graph-target-duration'}
         root = download_indic_models(quality, progress)
         progress('Loading native-script text and voice models')
         self.text_encoder = session(root/f'text_encoder{suffix}.onnx')
@@ -148,14 +149,13 @@ class IndicEngine(SpeechEngine):
             'speed': np.array(1.0, dtype=np.float32)}
         condition = self.text_encoder.run(None, feeds)[0].astype(np.float32)
         if self.speed != 1.0 and condition.shape[1] > prompt_length:
-            # The graph's duration expansion moves text throughout the full
-            # prompt+target sequence. Changing its speed also moves prompt text
-            # relative to the fixed reference audio. Retain the original prompt
-            # frames and resample only target frames, without blending embeddings.
-            target = condition[:, prompt_length:]
-            count = max(1, round(target.shape[1]/self.speed))
-            indices = np.linspace(0, target.shape[1]-1, count).round().astype(np.int64)
-            condition = np.concatenate((condition[:, :prompt_length], target[:, indices]), axis=1)
+            # Compensate for the graph's full-sequence duration scaling. A
+            # reference-fixed target-frame experiment degraded actual voice and
+            # content scores; retain the measured graph expansion contract.
+            total = condition.shape[1]
+            desired = prompt_length+(total-prompt_length)/self.speed
+            feeds['speed'] = np.array(total/desired, dtype=np.float32)
+            condition = self.text_encoder.run(None, feeds)[0].astype(np.float32)
         return condition
 
     def generate_chunk(self, text, voice, progress):
