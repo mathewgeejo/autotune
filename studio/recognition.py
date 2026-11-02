@@ -123,6 +123,11 @@ def recognize(path, folder, language=None, progress=lambda message: None, fallba
     del model
     gc.collect()
     result['script_check'] = transcript_script_check(result['text'], language or info.language)
+    if language == 'ml':
+        from studio.compact_recognition import checkpoint_metadata
+        checkpoint = checkpoint_metadata(root)
+        if checkpoint:
+            result['checkpoint'] = checkpoint
     result['timings']['total_seconds'] = active_time()-started
     return result
 

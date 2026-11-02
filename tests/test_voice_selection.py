@@ -42,3 +42,12 @@ def test_unavailable_or_nonfinite_checks_and_different_judges_are_not_accepted()
         before = copy.deepcopy(baseline)
         assert not compare_reading(baseline, candidate)['accepted']
         assert baseline == before
+
+
+@pytest.mark.parametrize('candidate_hash,accepted', [('a'*64, True), ('b'*64, False), (None, False)])
+def test_retry_cannot_mix_storage_checkpoints_under_the_same_source_revision(candidate_hash, accepted):
+    baseline, candidate = audit(.5, .09, .97), audit(.25, .04, .96)
+    baseline['transcription']['checkpoint'] = {'weights_sha256': 'a'*64}
+    if candidate_hash:
+        candidate['transcription']['checkpoint'] = {'weights_sha256': candidate_hash}
+    assert compare_reading(baseline, candidate)['accepted'] is accepted

@@ -1,5 +1,7 @@
 import subprocess
 import sys
+import threading
+from types import SimpleNamespace
 import time
 
 import psutil
@@ -28,6 +30,14 @@ def test_cancel_kills_children_and_allows_next_task(tmp_path, monkeypatch):
     sample = tmp_path / 'sample.wav'
     sample.write_bytes(b'owned sample')
     payload = {'source': str(sample), 'text': 'This is a cancellation test.', 'quality': CHECKED_QUALITY}
+    partial_observed = threading.Event()
+    read_report = jobs._read_report
+    def observe_partial(path):
+        report = read_report(path)
+        if path.name == 'result.json' and path.exists() and report is None:
+            partial_observed.set()
+        return report
+    monkeypatch.setattr(jobs, '_read_report', observe_partial)
     first = manager.submit('clone', payload)
     try:
         with pytest.raises(jobs.BusyError):
@@ -38,6 +48,8 @@ def test_cancel_kills_children_and_allows_next_task(tmp_path, monkeypatch):
         child = int(child_pid_file.read_text())
         # A cancellation during result writing must still release the job slot.
         (tmp_path/first/'result.json').write_text('{', encoding='utf-8')
+        assert partial_observed.wait(5), 'Watcher did not encounter the partial result'
+        assert manager.snapshot(first)['state'] == 'running'
         manager.cancel()
         while manager.active and time.monotonic() < deadline:
             time.sleep(0.1)
@@ -67,3 +79,22 @@ def test_storage_cleanup_preserves_models_and_rejects_outside_paths(tmp_path, mo
     monkeypatch.setattr(jobs, 'JOBS', tmp_path.parent)
     with pytest.raises(ValueError, match='Invalid storage'):
         manager.clear()
+
+
+def test_valid_worker_result_survives_a_followup_file_read_failure(tmp_path, monkeypatch):
+    manager = jobs.JobManager()
+    completed = {'audio': str(tmp_path/'speech.wav')}
+    observed = []
+    def read_once(path):
+        if path.name != 'result.json':
+            return None
+        observed.append(path)
+        return completed if len(observed) == 1 else None
+    monkeypatch.setattr(jobs, '_read_report', read_once)
+    manager.jobs['test'] = {'process': SimpleNamespace(poll=lambda: None), 'folder': tmp_path,
+        'started': jobs.active_time(), 'cancelled': False, 'state': 'running', 'peak_mb': 0}
+    manager.active = 'test'
+    manager._watch_awake('test')
+    assert manager.snapshot('test')['state'] == 'complete'
+    assert manager.snapshot('test')['result'] == completed
+    assert manager.active is None

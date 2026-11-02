@@ -1,0 +1,3 @@
+# Isolated optional graph-inspection tools; not app runtime dependencies.
+onnx==1.17.0
+protobuf==5.29.5

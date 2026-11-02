@@ -48,6 +48,12 @@ def download_indic_models(quality='Detailed', progress=lambda message: None):
 def download_asr(progress=lambda message: None, language=None):
     if language == 'ml':
         from studio.paths import MODELS
+        if os.environ.get('VOICE_STUDIO_COMPACT_ASR', '0') == '1':
+            from studio.compact_recognition import verified_malayalam_cache
+            compact = verified_malayalam_cache()
+            if compact is not None:
+                progress('Using the verified compact Malayalam recognizer')
+                return str(compact)
         progress('Checking native Malayalam recognition (first download: about 3.1 GB)')
         root = Path(snapshot_download(MALAYALAM_ASR_ID, revision=MALAYALAM_ASR_REVISION,
             allow_patterns=['model.bin', 'config.json', 'vocabulary.txt', 'README.md'], max_workers=2))

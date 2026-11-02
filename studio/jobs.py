@@ -20,6 +20,14 @@ class BusyError(ValueError):
     pass
 
 
+def _read_report(path):
+    try:
+        report = json.loads(path.read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return None
+    return report if isinstance(report, dict) else None
+
+
 class JobManager:
     def __init__(self):
         self.lock = threading.RLock()
@@ -111,8 +119,12 @@ class JobManager:
         job = self.jobs[job_id]
         process = job['process']
         folder = job['folder']
+        outcome = None
         while process.poll() is None:
-            if (folder / 'result.json').is_file() or (folder / 'failure.json').is_file():
+            # A partial or temporarily unreadable file is not a terminal worker
+            # outcome. Keep the job cancellable until a valid report or exit.
+            outcome = _read_report(folder/'result.json')
+            if outcome or _read_report(folder/'failure.json') is not None:
                 break
             try:
                 parent = psutil.Process(process.pid)
@@ -123,10 +135,7 @@ class JobManager:
             time.sleep(0.25)
         with self.lock:
             job['elapsed'] = active_time() - job['started']
-            try:
-                job['result'] = json.loads((folder / 'result.json').read_text(encoding='utf-8'))
-            except (OSError, ValueError):
-                job['result'] = {}
+            job['result'] = outcome or _read_report(folder/'result.json') or {}
             job['state'] = ('cancelled' if job['cancelled'] else
                             'complete' if job['result'] else 'failed')
             if job['state'] == 'failed' and not (folder / 'failure.json').exists():

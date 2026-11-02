@@ -2,6 +2,7 @@
 import hashlib
 from importlib.metadata import version, PackageNotFoundError
 import json
+from pathlib import Path
 
 from studio.paths import MODELS
 
@@ -61,3 +62,12 @@ def verified_malayalam_cache():
         return root
     except (OSError, ValueError, TypeError, AttributeError, KeyError, PackageNotFoundError):
         return None
+
+
+def checkpoint_metadata(root):
+    if Path(root).resolve() != (MODELS/'experimental-asr-int8-cpu').resolve():
+        return None
+    if verified_malayalam_cache() is None:
+        return None
+    return {'weights_sha256': MODEL_SHA256, 'source_weights_sha256': SOURCE_SHA256,
+            'storage_precision': 'int8-with-fp32-convolutions'}

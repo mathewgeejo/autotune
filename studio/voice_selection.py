@@ -37,6 +37,15 @@ def compare_reading(default, candidate):
     result.update(default_word_error=base[0], candidate_word_error=other[0],
                   default_grapheme_error=base[1], candidate_grapheme_error=other[1],
                   default_speaker_cosine=base[2], candidate_speaker_cosine=other[2])
+    checkpoints = [audit.get('transcription', {}).get('checkpoint') for audit in (default, candidate)]
+    if any(checkpoint is not None for checkpoint in checkpoints):
+        if not all(isinstance(checkpoint, dict) for checkpoint in checkpoints):
+            return {**result, 'reason': 'Recognizer checkpoint metadata must match for both readings.'}
+        weight = checkpoints[0].get('weights_sha256')
+        if (not isinstance(weight, str) or len(weight) != 64
+                or any(char not in '0123456789abcdef' for char in weight)
+                or weight != checkpoints[1].get('weights_sha256')):
+            return {**result, 'reason': 'Different recognizer checkpoint bytes make the readings incomparable.'}
     if other[0] > base[0] or other[1] > base[1] or other[:2] == base[:2]:
         return {**result, 'reason': 'Word/grapheme errors must improve without worsening the other content score.'}
     if other[2] < base[2]-MAX_SPEAKER_DROP:
