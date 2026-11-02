@@ -5,6 +5,7 @@ import hashlib
 import json
 from pathlib import Path
 import sys
+import time
 import traceback
 import zipfile
 
@@ -15,7 +16,16 @@ configure()
 def atomic_json(path, value):
     temporary = path.with_suffix('.tmp')
     temporary.write_text(json.dumps(value), encoding='utf-8')
-    temporary.replace(path)
+    for attempt in range(8):
+        try:
+            temporary.replace(path)
+            return
+        except PermissionError:
+            if attempt == 7:
+                raise
+            # A Windows reader or scanner can briefly deny replacement. Keep
+            # the last complete JSON visible while waiting for the handle.
+            time.sleep(min(0.01*2**attempt, 0.2))
 
 
 def reference_transcript(preview, folder, language, progress, target_language=None):
@@ -78,7 +88,12 @@ def run(request_path, engine=None):
         if preview:
             latest_preview = preview
         print(message, flush=True)
-        atomic_json(folder / 'status.json', {'stage': message, 'preview': latest_preview})
+        try:
+            atomic_json(folder / 'status.json', {'stage': message, 'preview': latest_preview})
+        except PermissionError:
+            # Status is advisory. Losing one update must not lose the speech;
+            # result/failure files still use the strict atomic writer.
+            print('Progress display is temporarily locked; processing continues.', flush=True)
     with (folder / 'worker.log').open('a', encoding='utf-8', buffering=1) as log:
         with contextlib.redirect_stdout(log), contextlib.redirect_stderr(log):
             try:

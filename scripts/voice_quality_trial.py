@@ -47,9 +47,13 @@ def main():
             save()
             job = wait(manager, job_id, timeout=1800)
             result = job['result']
-            report.update(result=result, elapsed_seconds=job['elapsed'], peak_worker_mb=job['peak_mb'],
+            report.update(status='generated', result=result, elapsed_seconds=job['elapsed'], peak_worker_mb=job['peak_mb'],
                 selection=json.loads((job['folder']/'reference-section.json').read_text(encoding='utf-8')))
             save()
+        except Exception as exc:
+            report.update(status='failed', error=str(exc))
+            save()
+            raise
         finally:
             manager.close()
         folder = args.output.parent/args.output.stem
