@@ -62,3 +62,11 @@ Per-passage stage timings are now recorded in `speech-metrics.json`: English lan
 - Jo English: speaker cosine **0.9143**, same-recording control **0.9631**, zero recognized content errors. Request 31.7 seconds, 892 MB peak worker RSS. Language generation used 6.9 seconds and waveform decoding 10.4 seconds. Evidence: `data/quality/en-jo-baseline.json`.
 
 An optional Intel GPU experiment is now testing the **same FP32 flow model and 32 steps** against CPU output. It records waveform error/correlation, cold compilation, repeated synthesis, and independent content/identity checks. The package is installed in an isolated `.tools/openvino-runtime` folder; production dependencies and backend selection remain unchanged. No speed or fidelity result is claimed until the full trial finishes.
+
+## Intel and synthesized-speech quality results
+
+The full Intel FP32 trial completed: 23.8 seconds to compile, 96.3 seconds for the first synthesis and **82.6 seconds for the repeated synthesis**, versus about 133 seconds on CPU. Speaker cosine is **0.9243**, with zero recognized word/grapheme errors. CPU/GPU waveform correlations were 0.9934/0.9916; relative waveform RMS differences were 0.116/0.129, so this is not sample-identical arithmetic. Evidence: `data/quality/ml-intel-fp32.json`.
+
+Independent quality guards remain close for this case: GPU DNSMOS overall 3.170 versus CPU 3.207; GPU UTMOS predicted MOS 3.084 versus CPU 3.071. Both are learned proxies, not human ratings. UTMOS correctly penalizes controlled noise and hard clipping on the English control (natural 3.773, noise 1.413, clipping 1.253). The natural Malayalam reference scores only 2.329, while the generated clip scores 3.071: source quality and language-domain effects make universal predicted-MOS cutoffs inappropriate. Jo's generated English scores 4.175. Evidence: `data/quality/utmos-calibration.json` and `data/quality/ml-intel-noise-quality.json`.
+
+Production remains on CPU pending another voice and longer-passage acceleration checks. The experimental runtime stays optional and preserves the existing 32-step/full-precision quality settings.
