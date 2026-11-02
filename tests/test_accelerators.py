@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
 import numpy as np
+import pytest
 
 from studio import accelerators
 
@@ -21,7 +22,8 @@ def test_unavailable_gpu_keeps_cpu_generation_available(tmp_path, monkeypatch):
     assert accelerators.flow_session('model.onnx', lambda message: None, lambda path: expected) is expected
 
 
-def test_gpu_output_is_owned_and_failed_step_retries_on_cpu(tmp_path, monkeypatch):
+@pytest.mark.parametrize('problem', ['exception', 'nonfinite'])
+def test_gpu_output_is_owned_and_failed_step_retries_on_cpu(tmp_path, monkeypatch, problem):
     monkeypatch.setattr(accelerators, 'MODELS', tmp_path)
     outputs = np.array([1.0], dtype=np.float32)
     class Request:
@@ -29,8 +31,9 @@ def test_gpu_output_is_owned_and_failed_step_retries_on_cpu(tmp_path, monkeypatc
         def infer(self, feeds):
             self.calls += 1
             if self.calls == 2:
-                outputs[:] = 999
-                raise RuntimeError('Simulated GPU failure')
+                outputs[:] = np.nan
+                if problem == 'exception':
+                    raise RuntimeError('Simulated GPU failure')
         def get_output_tensor(self, index):
             return SimpleNamespace(data=outputs)
     request = Request()

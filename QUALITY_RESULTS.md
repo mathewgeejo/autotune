@@ -74,3 +74,11 @@ Independent quality guards remain close for this case: GPU DNSMOS overall 3.170 
 Production remains on CPU pending another voice and longer-passage acceleration checks. The experimental runtime stays optional and preserves the existing 32-step/full-precision quality settings.
 
 The additional male-archive Intel trial completed: warm synthesis **50.7 seconds** versus CPU 102.3 seconds; speaker cosine 0.9044 versus CPU 0.9298, zero recognized content errors, CPU/GPU waveform correlation 0.9998. Cached compilation took 2.4 seconds. The optional backend now has CPU-only/unavailable-device checks, owned-output checks, and a failed-step CPU retry check. The complete regression suite passes **37 tests**. Normal-worker tests are the next integration gate. Evidence: `data/quality/ml-male-intel-fp32.json`.
+
+## Production integration and longer-passage pronunciation
+
+The normal production worker successfully used the optional Intel FP32 backend for a novel Malayalam sentence, retaining 32 steps and guidance 2. The 4.63-second result required 95.2 seconds for the request, with 847 MB peak worker RSS. Flow computation used 87.1 seconds. Backend integration is working; this does not close the voice-quality gate.
+
+The longer sentence has independent speaker cosine **0.9749**, but recognized word error rate **0.50** and grapheme error rate **0.091**. A natural recording of the same expected words has word error rate **0.125** and grapheme error rate **0.023**. The natural recording is a different voice and is used only to calibrate content recognition. Three additional word differences in the synthesized recording remain a pronunciation-review target; high speaker similarity does not establish a pass. Evidence: `data/quality/ml-longer-production-intel.json`.
+
+The trial runner now accepts a natural same-text content control and avoids asserting identical words when a longer reference has been cropped to ten seconds. CPU recovery is checked for both GPU exceptions and nonfinite output. The complete suite passes **38 tests**. Next: controlled guidance/timing comparisons on this difficult sentence, broader English passage testing, and fair listening comparisons. Human indistinguishability remains unproven.

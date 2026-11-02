@@ -10,7 +10,7 @@ sys.path.insert(0, str(ROOT))
 from studio.paths import configure
 configure()
 from studio.jobs import JobManager
-from studio.recognition import full_audit, speaker_similarity
+from studio.recognition import full_audit, speaker_similarity, recognize, content_comparison
 from studio.runtime import keep_awake
 from scripts.smoke import wait
 import soundfile as sf
@@ -26,6 +26,7 @@ def main():
     parser.add_argument('--language', choices=['en', 'ml'], required=True)
     parser.add_argument('--baseline', type=Path)
     parser.add_argument('--baseline-reference', type=Path)
+    parser.add_argument('--content-control', type=Path, help='Natural recording of the expected words, used to calibrate recognition errors.')
     parser.add_argument('--output', required=True, type=Path)
     args = parser.parse_args()
     if args.text_file:
@@ -81,9 +82,19 @@ def main():
         report['same_human_different_words_control'] = speaker_similarity(folder/'human-first.wav',
             folder/'human-second.wav', folder, progress)
         report['candidate_audit'] = full_audit(clean, result['audio'], args.text, folder, args.language, progress)
+        if args.content_control:
+            control_folder = folder/'content-control'
+            control_folder.mkdir(exist_ok=True)
+            transcript = recognize(args.content_control, control_folder, args.language, progress)
+            report['natural_content_control'] = {'audio':str(args.content_control.resolve()),
+                'transcription':transcript, 'content_comparison':content_comparison(args.text, transcript)}
         from studio.analysis import normalize_text, analyze_files
         if reference_text and normalize_text(reference_text) == normalize_text(args.text):
-            report['same_words_acoustics'], _, _, _ = analyze_files(clean, result['audio'], folder/'same-words', same_words=True)
+            if report['selection']['uploaded_selection_seconds'] <= 10.02:
+                report['same_words_acoustics'], _, _, _ = analyze_files(clean, result['audio'], folder/'same-words', same_words=True)
+            else:
+                report['same_words_acoustics'] = {'available':False,
+                    'reason':'A longer source was cropped to ten seconds; its full caption cannot establish identical selected words.'}
         report['status'] = 'measured'
         save()
         summary = {key: report[key] for key in ('job_id', 'language', 'elapsed_seconds', 'peak_worker_mb', 'selection')}
