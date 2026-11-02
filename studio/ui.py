@@ -228,8 +228,8 @@ def create_app():
                         gr.HTML('<div class="step-label">02 / WORDS & LANGUAGE</div>')
                         with gr.Row():
                             language = gr.Dropdown(language_options, value='auto', label='Speech language')
-                            quality = gr.Radio(['Balanced', 'Detailed'], value='Detailed', label='Indic quality',
-                                info='Indic cloning is experimental. Detailed uses full precision and takes longer; matching the reference language helps pronunciation.')
+                            quality = gr.Radio(['Balanced', 'Detailed', 'Detailed + word check'], value='Detailed', label='Indic quality',
+                                info='Indic cloning is experimental. Word checking takes longer and can retry Malayalam pronunciation once. Its first recognition download is about 3.1 GB.')
                         text = gr.Textbox(label='Text to speak', lines=6, max_lines=12, max_length=5000,
                                           placeholder='Type in English, Hindi, or Malayalam...', elem_id='speech-text')
                         gr.Markdown('Up to 5,000 characters. Longer text is generated in passages and joined into one WAV.')

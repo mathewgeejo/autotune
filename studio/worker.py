@@ -80,7 +80,12 @@ def analyze(request, folder, progress):
             'analysis': report}
 
 
-def run(request_path, engine=None):
+def run(request_path, engine=None, state=None):
+    if state is not None:
+        # The serving frame owns only this mutable container while run executes.
+        # Passing its cached model as a positional argument would keep another
+        # strong reference alive until the call returned, defeating releases.
+        engine = state.pop('engine', None)
     folder = request_path.parent
     latest_preview = None
     def progress(message, preview=None):
@@ -115,7 +120,10 @@ def run(request_path, engine=None):
                     prepared = prepare_sample(request['source'], folder,
                                               request.get('start'), request.get('end'))
                     quality = request.get('quality', 'Detailed')
-                    key = ('en',) if language == 'en' else ('indic', quality)
+                    from studio.pronunciation import CHECKED_QUALITY, check_pronunciation
+                    checked = quality == CHECKED_QUALITY and language == 'ml'
+                    engine_quality = 'Detailed' if quality == CHECKED_QUALITY else quality
+                    key = ('en',) if language == 'en' else ('indic', engine_quality)
                     if engine is not None and getattr(engine, 'engine_key', None) != key:
                         engine = None
                         gc.collect()
@@ -134,11 +142,18 @@ def run(request_path, engine=None):
                         else:
                             from studio.indic import IndicEngine
                             progress('Starting the Malayalam/Hindi cloning engine')
-                            engine = IndicEngine(progress, quality)
+                            engine = IndicEngine(progress, engine_quality)
                         engine.engine_key = key
                     else:
                         progress('Reusing the loaded speech model')
                     result = engine.synthesize(request, folder, progress, prepared=prepared)
+                    if checked:
+                        # Do not retain the synthesis model while ASR/verifier
+                        # models run on a laptop with limited available memory.
+                        engine = None
+                        gc.collect()
+                        result = check_pronunciation(request, folder, prepared, result, progress,
+                            lambda report: atomic_json(folder/'word-check.json', report))
                     progress('Your speech is ready to play and download.')
                 atomic_json(folder / 'result.json', result)
             except Exception as exc:
@@ -156,10 +171,10 @@ def run(request_path, engine=None):
 
 def main():
     if sys.argv[1:] == ['--serve']:
-        engine = None
+        state = {'engine': None}
         for line in sys.stdin:
             if line.strip():
-                engine = run(Path(json.loads(line)).resolve(), engine)
+                state['engine'] = run(Path(json.loads(line)).resolve(), state=state)
     else:
         request = Path(sys.argv[1]).resolve()
         run(request)

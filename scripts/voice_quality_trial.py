@@ -24,6 +24,8 @@ def main():
     words.add_argument('--text')
     words.add_argument('--text-file', type=Path)
     parser.add_argument('--language', choices=['en', 'ml'], required=True)
+    parser.add_argument('--quality', choices=['Balanced', 'Detailed', 'Detailed + word check'], default='Detailed')
+    parser.add_argument('--warm-baseline-report', type=Path, help='Run a normal generation first to exercise persistent-worker model ownership.')
     parser.add_argument('--baseline', type=Path)
     parser.add_argument('--baseline-reference', type=Path)
     parser.add_argument('--content-control', type=Path, help='Natural recording of the expected words, used to calibrate recognition errors.')
@@ -47,9 +49,18 @@ def main():
     manager = JobManager()
     with keep_awake():
         try:
+            if args.warm_baseline_report:
+                warm = json.loads(args.warm_baseline_report.read_text(encoding='utf-8'))
+                warm_id = manager.submit('clone', {'source': warm['source_reference'], 'text': warm['expected'],
+                    'reference_text': warm['result'].get('reference_text', ''), 'language': warm['language'], 'quality': 'Detailed'})
+                report['warmup_job_id'] = warm_id
+                save()
+                warm_job = wait(manager, warm_id, timeout=1800)
+                report['warmup_result'] = warm_job['result']
+                save()
             job_id = manager.submit('clone', {'source': str(args.reference.resolve()), 'text': args.text,
                 'reference_text': reference_text,
-                'language': args.language, 'quality': 'Detailed'})
+                'language': args.language, 'quality': args.quality})
             report['job_id'] = job_id
             save()
             job = wait(manager, job_id, timeout=1800)
