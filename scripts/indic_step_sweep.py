@@ -52,7 +52,7 @@ def reference_fixed_text_conditioning(self, text, prompt_tokens, prompt_length):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--baseline-report', type=Path, required=True)
-    parser.add_argument('--steps', type=int, nargs='+', choices=[8, 16, 24, 32], default=[8, 16])
+    parser.add_argument('--steps', type=int, nargs='+', choices=[8, 16, 24, 32, 64], default=[8, 16])
     parser.add_argument('--guidance', type=float, nargs='+', default=[2.0])
     parser.add_argument('--speed', type=float, nargs='+', default=[1.0])
     parser.add_argument('--accelerator', choices=['cpu', 'intel'], default='cpu')
