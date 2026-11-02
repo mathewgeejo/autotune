@@ -117,17 +117,22 @@ class RowWeights(model_spec.LayerSpec):
         self.weight_scale = model_spec.OPTIONAL
 
 
-def convert(source, output, expected_sha256, chunk_rows=128):
+def convert(source, output, expected_sha256, chunk_rows=128, keep_convolutions_fp32=False):
     if not 1 <= chunk_rows <= 1024 or not re.fullmatch(r'[a-f0-9]{64}', expected_sha256):
         raise ValueError('A valid source SHA256 and 1-1024 chunk rows are required')
     source = source.resolve(strict=True)
     model = source/'model.bin'
     header, tensors, aliases = index_model(model)
     selected = quantizable_tensors(model, tensors)
+    if keep_convolutions_fp32:
+        # CTranslate2's DNNL CPU path keeps convolution weights in float32.
+        # Saving them as INT8 first would add a lossy round trip on that path.
+        selected = {name for name in selected if not name.startswith('encoder/conv')}
     output.mkdir(parents=True, exist_ok=False)
     report = {'state': 'converting', 'source': str(model), 'expected_source_sha256': expected_sha256,
               'ctranslate2_version': ctranslate2.__version__, 'source_header': header,
               'quantized_tensors': len(selected), 'chunk_rows': chunk_rows,
+              'keep_convolutions_fp32': keep_convolutions_fp32,
               'algorithm': 'Official LayerSpec._quantize(int8), independent row chunks',
               'scope': 'Experimental derived checkpoint; no app adoption or recognition parity claim.'}
     manifest = output/'conversion.json'
@@ -205,9 +210,12 @@ def main():
     parser.add_argument('--source', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--expected-source-sha256', required=True)
+    parser.add_argument('--keep-convolutions-fp32', action='store_true',
+                        help='Avoid a lossy INT8/dequantize round trip for DNNL CPU convolution.')
     args = parser.parse_args()
     with keep_awake():
-        print(json.dumps(convert(args.source, args.output, args.expected_source_sha256), indent=2), flush=True)
+        print(json.dumps(convert(args.source, args.output, args.expected_source_sha256,
+                                 keep_convolutions_fp32=args.keep_convolutions_fp32), indent=2), flush=True)
 
 
 if __name__ == '__main__':

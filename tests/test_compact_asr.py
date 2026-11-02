@@ -52,25 +52,28 @@ def make_source(folder):
     return variables, hashlib.sha256((folder/'model.bin').read_bytes()).hexdigest()
 
 
-def test_chunked_checkpoint_is_byte_identical_to_official_whole_tensor_quantization(tmp_path):
+@pytest.mark.parametrize('keep_convolutions_fp32', [False, True])
+def test_chunked_checkpoint_is_byte_identical_to_official_whole_tensor_quantization(tmp_path, keep_convolutions_fp32):
     source, output = tmp_path/'original', tmp_path/'compact'
     variables, digest = make_source(source)
     original_bytes = (source/'model.bin').read_bytes()
     expected = dict(variables)
     for key in ('encoder/conv1/weight', 'decoder/embeddings/weight'):
+        if keep_convolutions_fp32 and key.startswith('encoder/conv'):
+            continue
         layer = OfficialWeights(variables[key])
         layer._quantize('int8')
         expected[key] = layer.weight.numpy()
         expected[key+'_scale'] = layer.weight_scale.numpy()
     golden = tmp_path/'official.bin'
     FixtureSpec(expected)._serialize(str(golden))
-    report = convert(source, output, digest, chunk_rows=3)
+    report = convert(source, output, digest, chunk_rows=3, keep_convolutions_fp32=keep_convolutions_fp32)
     assert (output/'model.bin').read_bytes() == golden.read_bytes()
     assert (source/'model.bin').read_bytes() == original_bytes
     assert (output/'config.json').read_bytes() == (source/'config.json').read_bytes()
     assert report['source_sha256'] == digest
     assert report['state'] == 'generated-unvalidated'
-    assert report['quantized_tensors'] == 2
+    assert report['quantized_tensors'] == (1 if keep_convolutions_fp32 else 2)
 
 
 def test_wrong_source_hash_never_publishes_a_candidate_or_modifies_original(tmp_path):
