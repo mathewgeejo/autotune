@@ -1,8 +1,10 @@
 """Check automatic reference transcription through the running app's browser UI."""
 import argparse
+import hashlib
 import json
 from pathlib import Path
 import sys
+from urllib.parse import urljoin
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT/'.tools/browser'))
@@ -14,6 +16,7 @@ def main():
     parser.add_argument('--reference', type=Path, required=True)
     parser.add_argument('--port', type=int, default=7862)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--text-file', type=Path, help='Also generate these words and validate the downloaded WAV.')
     args = parser.parse_args()
     if args.output.exists():
         parser.error('Use a fresh output path.')
@@ -43,6 +46,33 @@ def main():
             assert len(full.split()) >= len(selected.split())
             page.get_by_role('button', name='Generate speech', exact=True).wait_for(state='visible')
             page.wait_for_function("() => [...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Generate speech')?.disabled === false")
+            if args.text_file:
+                expected = args.text_file.read_text(encoding='utf-8')
+                jobs = ROOT/'data/jobs'
+                before = {path.name for path in jobs.iterdir() if path.is_dir()}
+                page.locator('#speech-text textarea').fill(expected)
+                page.get_by_role('button', name='Generate speech', exact=True).click()
+                page.wait_for_function("() => /Starting|RUNNING/.test(document.querySelector('#status textarea').value)", timeout=30000)
+                page.wait_for_function("() => /COMPLETE|FAILED/.test(document.querySelector('#status textarea').value)", timeout=900000)
+                report['generation_activity'] = page.locator('#status textarea').input_value()
+                assert 'COMPLETE' in report['generation_activity'], report['generation_activity']
+                link = page.locator('a[href*="speech.wav"]').first
+                link.wait_for(timeout=30000)
+                response = page.request.get(urljoin(page.url, link.get_attribute('href')))
+                assert response.ok
+                digest = hashlib.sha256(response.body()).hexdigest()
+                matches = []
+                for folder in jobs.iterdir():
+                    if folder.name in before or not (folder/'result.json').is_file():
+                        continue
+                    request = json.loads((folder/'request.json').read_text(encoding='utf-8'))
+                    result = json.loads((folder/'result.json').read_text(encoding='utf-8'))
+                    if request.get('mode') == 'clone' and request.get('text') == expected:
+                        if hashlib.sha256(Path(result['audio']).read_bytes()).hexdigest() == digest:
+                            matches.append((folder, result))
+                assert len(matches) == 1, 'Download must match exactly one new generation of these words.'
+                report.update(generation_job=matches[0][0].name, audio_sha256=digest,
+                              generated_seconds=matches[0][1]['duration'], passages=matches[0][1]['passages'])
             page.set_viewport_size({'width': 390, 'height': 844})
             assert page.evaluate('document.documentElement.scrollWidth <= innerWidth + 2'), 'Mobile overflow'
             assert not report['page_errors'], report['page_errors']

@@ -23,6 +23,8 @@ English reference transcription is no longer skipped. The UI automatically displ
 
 The optional word-check setting now supports English with one shorter-passage retry and the existing relative voice guard. Long-export checks cover every immutable passage rather than truncating recognition at the first minute. The regression suite passes 82 tests; no application build was run.
 
+A real checked English request completed its five-passage retry and retained the default because recognized word/grapheme errors tied. The default/candidate speaker scores were 0.8818/0.9102; the guard requires content improvement. A subsequent browser upload and generation of the original prompt passed end to end: cached full/selected transcription appeared in three seconds, the four-passage 12.92-second export finished in 66 seconds, and downloaded WAV bytes matched exactly one new job. Peak sampled generation-worker RSS was 854 MB; there were no page errors or mobile overflow. Report: `data/quality/user-english-ui-generation.json`.
+
 ## 2 November: reference transient and fair Malayalam comparison
 
 The original Malayalam FLEURS recording contains an isolated peak at 9 ms, separated from speech by a long quiet interval. It constrained reference normalization and the independent verifier's input level. The new selector excludes isolated, extreme boundary transients while preserving speech and interior pauses. It does not denoise or pitch-shift the voice.
