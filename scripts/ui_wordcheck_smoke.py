@@ -4,6 +4,7 @@ Requires installed Chrome, .tools/browser, and a running local app. Uses a real
 previously measured no-error case; this is workflow coverage, not human listening.
 """
 import argparse
+import hashlib
 import json
 from pathlib import Path
 import sys
@@ -44,12 +45,17 @@ def main():
             page.get_by_role('button', name='Upload file', exact=True).click()
             with page.expect_response(lambda r: '/upload' in r.url and r.request.method == 'POST', timeout=60000):
                 page.locator('#voice-sample input[type=file]').set_input_files(baseline['source_reference'])
+            page.wait_for_function("""() => document.querySelector('#reference-transcript textarea')?.value.trim()
+                && [...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Generate speech')?.disabled === false""",
+                timeout=900000)
             page.get_by_text('Selected reference and transcript', exact=True).click()
             page.get_by_text('Conditioning uses', exact=False).first.wait_for(timeout=60000)
             page.get_by_label('Words in the selected reference (optional)', exact=True).fill(
                 baseline['result']['reference_text'])
             page.locator('#speech-text textarea').fill(baseline['expected'])
             page.get_by_role('radio', name='Detailed + word check', exact=True).check()
+            jobs_root = ROOT/'data/jobs'
+            existing_jobs = {path.name for path in jobs_root.iterdir() if path.is_dir()}
             page.get_by_role('button', name='Generate speech', exact=True).click()
             page.wait_for_function("() => /Starting|RUNNING/.test(document.querySelector('#status textarea').value)", timeout=30000)
             page.wait_for_function("() => /COMPLETE|FAILED/.test(document.querySelector('#status textarea').value)", timeout=1800000)
@@ -62,12 +68,27 @@ def main():
             body = response.body()
             assert body[:4] == b'RIFF' and body[8:12] == b'WAVE'
             audio = Path(unquote(href).split('file=', 1)[1].split('?', 1)[0]).resolve()
-            audio.relative_to((ROOT/'data/jobs').resolve())
-            result = json.loads((audio.parent/'result.json').read_text(encoding='utf-8'))
+            assert any(audio.is_relative_to(path.resolve()) for path in (jobs_root, ROOT/'data/tmp'))
+            digest = hashlib.sha256(body).hexdigest()
+            matches = []
+            for job in jobs_root.iterdir():
+                if not job.is_dir() or job.name in existing_jobs or not (job/'result.json').is_file():
+                    continue
+                request = json.loads((job/'request.json').read_text(encoding='utf-8'))
+                if request.get('text', '').strip() != baseline['expected'].strip():
+                    continue
+                result = json.loads((job/'result.json').read_text(encoding='utf-8'))
+                selected = Path(result['audio']).resolve()
+                selected.relative_to(job.resolve())
+                if hashlib.sha256(selected.read_bytes()).hexdigest() == digest:
+                    matches.append((job, result))
+            assert len(matches) == 1, 'Downloaded WAV must match exactly one new owned job'
+            job, result = matches[0]
             assert result['word_check']['status'] == 'word-check-passed'
             assert not result['word_check']['retry_attempted']
             assert result['precision']['guidance_scale'] == 2
-            report.update(audio=str(audio), job_id=audio.parent.name, word_check=result['word_check'])
+            report.update(audio=result['audio'], download_cache_path=str(audio), audio_sha256=digest,
+                          job_id=job.name, word_check=result['word_check'])
             page.screenshot(path=str(args.output.with_suffix('.desktop.png')), full_page=True)
             page.set_viewport_size({'width': 390, 'height': 844})
             page.screenshot(path=str(args.output.with_suffix('.mobile.png')), full_page=True)

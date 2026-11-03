@@ -57,8 +57,8 @@ class JobManager:
             text=True, encoding='utf-8', **worker_options())
 
     def submit(self, mode, payload):
-        if mode not in ('clone', 'analyze'):
-            raise ValueError('Choose speech generation or audio comparison.')
+        if mode not in ('clone', 'analyze', 'transcribe'):
+            raise ValueError('Choose speech generation, reference transcription, or audio comparison.')
         payload = dict(payload)
         if mode == 'clone':
             from studio.speech import split_text

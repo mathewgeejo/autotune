@@ -3,7 +3,29 @@ import pytest
 import soundfile as sf
 
 from studio.audio import AudioError
-from studio.speech import prepare_sample, split_text, SpeechEngine, STOP_TOKEN
+from studio.speech import prepare_sample, split_text, split_english_text, english_model_text, SpeechEngine, STOP_TOKEN
+
+
+def test_unpunctuated_english_is_bounded_without_losing_words():
+    text = ('hello my name is Alex and this is a demonstration I am reading a longer '
+            'message with no punctuation this is the final part with 12.75 dollars')
+    chunks = split_english_text(text)
+    assert len(chunks) >= 3
+    assert ' '.join(chunks) == text
+    assert all(len(chunk) <= 120 and len(chunk.split()) <= 16 for chunk in chunks)
+    assert all('12.' not in chunk or '12.75' in chunk for chunk in chunks)
+    assert english_model_text('hello there') == 'Hello there.'
+    assert english_model_text('Already complete!') == 'Already complete!'
+    assert english_model_text('my cpu reads ai text') == 'My CPU reads AI text.'
+
+
+def test_english_subjects_stay_with_their_predicates():
+    text = ('hello my name is Alex Smith i study in the local engineering college '
+            'this is my ai voice cloner my cpu is running smoothly i just finished watching a movie')
+    chunks = split_english_text(text)
+    assert ' '.join(chunks) == text
+    assert all(not chunk.endswith(('this is', 'my', 'i')) for chunk in chunks)
+    assert 'hello my name is Alex Smith' in chunks
 
 
 def test_long_text_keeps_every_word_and_numbers_in_order():

@@ -37,6 +37,7 @@ def reference_transcript(preview, folder, language, progress, target_language=No
         data = json.loads(target.read_text(encoding='utf-8'))
         if data.get('text', '').strip() and data.get('script_check', {}).get('reliable'):
             progress('Reusing the selected sample transcript')
+            atomic_json(folder/'reference-transcription.json', data)
             return data['text']
     from studio.recognition import recognize
     result = recognize(preview, folder, language, progress, fallback_language=target_language)
@@ -56,6 +57,23 @@ def reference_transcript(preview, folder, language, progress, target_language=No
     target.parent.mkdir(parents=True, exist_ok=True)
     atomic_json(target, result)
     return result['text']
+
+
+def transcribe_reference(request, folder, prepared, progress):
+    """Save both the complete selection and the exact conditioning clip words."""
+    language = request.get('reference_language')
+    language = None if language in ('auto', '', None) else language
+    target = request.get('language')
+    target = None if target == 'auto' else target
+    complete = folder/'sample-decoded.wav'
+    progress('Transcribing your reference recording')
+    full = reference_transcript(complete, folder, language, progress, target)
+    atomic_json(folder/'reference-full-transcription.json',
+                json.loads((folder/'reference-transcription.json').read_text(encoding='utf-8')))
+    progress('Transcribing the selected voice conditioning clip')
+    selected = reference_transcript(prepared[1], folder, language, progress, target)
+    return {'reference_full_text': full, 'reference_text': selected,
+            'reference_preview': str(prepared[1])}
 
 
 def analyze(request, folder, progress):
@@ -105,7 +123,14 @@ def run(request_path, engine=None, state=None):
                 from studio.audio import AudioError
                 from studio.speech import SpeechEngine, split_text, prepare_sample
                 request = json.loads(request_path.read_text(encoding='utf-8'))
-                if request['mode'] == 'analyze':
+                if request['mode'] == 'transcribe':
+                    engine = None
+                    gc.collect()
+                    prepared = prepare_sample(request['source'], folder,
+                                              request.get('start'), request.get('end'))
+                    result = transcribe_reference(request, folder, prepared, progress)
+                    progress('Reference transcription ready. Review the recognized words below your recording.')
+                elif request['mode'] == 'analyze':
                     if request.get('full_audit'):
                         engine = None
                         gc.collect()
@@ -121,20 +146,16 @@ def run(request_path, engine=None, state=None):
                                               request.get('start'), request.get('end'))
                     quality = request.get('quality', 'Detailed')
                     from studio.pronunciation import CHECKED_QUALITY, check_pronunciation
-                    checked = quality == CHECKED_QUALITY and language == 'ml'
+                    checked = quality == CHECKED_QUALITY and language in ('en', 'ml')
                     engine_quality = 'Detailed' if quality == CHECKED_QUALITY else quality
                     key = ('en',) if language == 'en' else ('indic', engine_quality)
                     if engine is not None and getattr(engine, 'engine_key', None) != key:
                         engine = None
                         gc.collect()
-                    if language != 'en' and not request.get('reference_text', '').strip():
+                    if not request.get('reference_text', '').strip():
                         engine = None
                         gc.collect()
-                        reference_language = request.get('reference_language')
-                        if reference_language in ('auto', ''):
-                            reference_language = None
-                        request['reference_text'] = reference_transcript(prepared[1], folder,
-                                                                        reference_language, progress, language)
+                        request.update(transcribe_reference(request, folder, prepared, progress))
                     if engine is None:
                         if language == 'en':
                             progress('Starting the English cloning engine')

@@ -4,6 +4,25 @@ This is the current priority. Deployment and Docker work are deferred. These mea
 
 Current candidate integration: optional Intel GPU acceleration for Detailed Indic flow, with automatic CPU fallback and the original FP32/32-step settings. The optional runtime is installed on this workstation. Normal-worker and longer-passage validation is in progress; English remains on its existing engine.
 
+## 3 November: incomplete English prompt and reference transcription
+
+A user-supplied English recording exposed a failure missed by the public demonstration clips: an unpunctuated 31-word prompt generated a 33.72-second WAV that stopped conveying the requested words after its introduction. The selected ten-second reference was clear speech. A shorter prompt with the identical reference retained much better speaker similarity, pointing to the long utterance rather than a missing recording.
+
+English now uses shorter clauses, terminal punctuation, and conventional capitalization for technical abbreviations. No target words are removed. The same saved prompt and selected natural reference produced:
+
+| Measurement | Original | Short clauses |
+| --- | ---: | ---: |
+| Recognized word-error rate | 0.6129 | 0.1935 |
+| Independent same-reference speaker cosine | 0.6134 | 0.9034 |
+| Output seconds | 33.72 | 12.92 |
+| Synthesis seconds | 212.82 | 62.23 |
+
+The new transcript includes the complete ending. Remaining differences include proper names, grammar, and a typo in the requested text; automated recognition cannot establish whether every name sounds correct. Decoder randomness is unchanged, and these are engineering measurements of one real failure, not a perceptual accuracy percentage or a claim of perfect cloning. Private recordings, captions, and reports remain outside Git.
+
+English reference transcription is no longer skipped. The UI automatically displays the full recording transcript and keeps the exact conditioning clip's words separately. A real browser upload of the saved recording passed, showing 77 full-recording words and 19 selected-clip words, without page errors or mobile overflow. The local report is `data/quality/user-english-ui-reference.json`.
+
+The optional word-check setting now supports English with one shorter-passage retry and the existing relative voice guard. Long-export checks cover every immutable passage rather than truncating recognition at the first minute. The regression suite passes 82 tests; no application build was run.
+
 ## 2 November: reference transient and fair Malayalam comparison
 
 The original Malayalam FLEURS recording contains an isolated peak at 9 ms, separated from speech by a long quiet interval. It constrained reference normalization and the independent verifier's input level. The new selector excludes isolated, extreme boundary transients while preserving speech and interior pauses. It does not denoise or pitch-shift the voice.

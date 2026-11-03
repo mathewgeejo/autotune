@@ -8,6 +8,51 @@ from studio import recognition, indic
 from studio.pronunciation import check_pronunciation
 
 
+def test_english_retry_uses_shorter_passages_and_releases_model_before_audit(tmp_path, monkeypatch):
+    from studio import speech
+    original = audit(.5, .2, .9)
+    monkeypatch.setattr(recognition, 'recognize', lambda path, folder, language, progress:
+                        original['transcription'] if language == 'en' else pytest.fail('English ASR required'))
+    monkeypatch.setattr(recognition, 'content_comparison', lambda *args: original['content_comparison'])
+    monkeypatch.setattr(recognition, 'speaker_similarity', lambda *args: original['speaker_verification'])
+    references = []
+    class Engine:
+        def __init__(self, progress):
+            self.precision = {'language_model': 'q4'}
+            references.append(weakref.ref(self))
+        def synthesize(self, request, folder, progress, prepared=None):
+            assert self.english_max_words == 8 and self.english_max_chars == 80
+            return {'audio': str(folder/'speech.wav'), 'reference_preview': 'reference.wav',
+                    'synthesis_seconds': 30, 'precision': dict(self.precision)}
+    monkeypatch.setattr(speech, 'SpeechEngine', Engine)
+    def candidate(*args):
+        assert references[0]() is None
+        assert args[4] == 'en'
+        return audit(0, 0, .91)
+    monkeypatch.setattr(recognition, 'full_audit', candidate)
+    result = check_pronunciation({'text': 'Complete English words.', 'language': 'en'}, tmp_path, None,
+                                baseline(tmp_path), lambda message: None, lambda report: None)
+    assert result['word_check']['selected'] == 'retry'
+
+
+def test_long_word_check_recognizes_all_passages_with_global_timestamps(tmp_path, monkeypatch):
+    import soundfile as sf
+    from studio.pronunciation import reading_transcript
+    paths = []
+    def recognize(path, folder, language, progress):
+        paths.append(path.name)
+        return {'text': path.stem, 'model': 'recognizer', 'revision': 'fixed',
+                'script_check': {'reliable': True}, 'segments': [{'start': 1., 'end': 2., 'words': []}]}
+    monkeypatch.setattr(recognition, 'recognize', recognize)
+    monkeypatch.setattr(sf, 'info', lambda path: SimpleNamespace(duration=35.))
+    result = reading_transcript({'audio': str(tmp_path/'speech.wav'), 'duration': 70, 'passages': 2},
+                                tmp_path/'checks', 'en', lambda message: None)
+    assert paths == ['passage-1.wav', 'passage-2.wav']
+    assert result['text'] == 'passage-1 passage-2'
+    assert result['segments'][1]['start'] == 36.
+    assert result['checked_passages'] == 2
+
+
 def audit(word, grapheme, speaker):
     return {'transcription': {'model': 'recognizer', 'revision': 'fixed'},
             'content_comparison': {'available': True, 'word_error_rate': word, 'grapheme_error_rate': grapheme},

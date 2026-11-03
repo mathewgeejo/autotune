@@ -38,13 +38,27 @@ CSS += """
 CSS += A11Y_CSS
 
 
-def generate(source, text, start, end, language='auto', quality='Detailed', reference_text='', reference_language='auto'):
+def generate(source, text, start, end, language='auto', quality='Detailed', reference_text='', reference_language='auto', reference_full_text=''):
     try:
         split_text(text)
         job_id = manager.submit('clone', {'source': source, 'text': text, 'start': start, 'end': end,
             'language': language, 'quality': quality, 'reference_text': reference_text or '',
-            'reference_language': reference_language})
+            'reference_language': reference_language, 'reference_full_text': reference_full_text or ''})
         return job_id, 'Starting voice cloning...', None, None, ''
+    except (ValueError, OSError) as exc:
+        raise gr.Error(str(exc)) from exc
+
+
+def start_transcription(source, start, end, reference_language):
+    if not source:
+        return gr.skip(), gr.skip(), gr.skip()
+    try:
+        job = manager.submit('transcribe', {'source': source, 'start': start, 'end': end,
+                                           'reference_language': reference_language})
+        return job, 'Transcribing your reference recording...', ''
+    except BusyError:
+        # Keep the current job connected to its Cancel button and results.
+        return gr.skip(), gr.skip(), gr.skip()
     except (ValueError, OSError) as exc:
         raise gr.Error(str(exc)) from exc
 
@@ -135,6 +149,12 @@ def poll_updates(job_id, delivered):
             stream.seek(max(0, stream.tell()-14000))
             log = stream.read().decode('utf-8', errors='replace')
         updates = {'status': message, 'logs': log}
+        transcript_path = job['folder']/'reference-full-transcription.json'
+        if transcript_path.is_file():
+            try:
+                updates['reference_full_text'] = json.loads(transcript_path.read_text(encoding='utf-8'))['text']
+            except (OSError, ValueError, KeyError):
+                pass
         if state == 'running':
             if job['mode'] == 'clone' and job['status'].get('preview') and not delivered:
                 updates.update(audio=job['status']['preview'], delivered=job_id+'-preview')
@@ -163,6 +183,12 @@ def poll_updates(job_id, delivered):
                            last_text=result.get('text', ''))
             if result.get('reference_text'):
                 updates['reference_text'] = result['reference_text']
+            if result.get('reference_full_text'):
+                updates['reference_full_text'] = result['reference_full_text']
+        elif job['mode'] == 'transcribe':
+            updates.update(reference_text=result['reference_text'],
+                           reference_full_text=result['reference_full_text'],
+                           selected=result['reference_preview'])
         else:
             from studio.analysis import load_tracks, comparison_figure
             summary, rows, segments, words = analysis_view(result['analysis'])
@@ -226,6 +252,10 @@ def create_app():
                                           label='Record or upload a voice sample', elem_id='voice-sample')
                         gr.Markdown('Upload **up to 60 seconds** of one person speaking. Clear, natural speech '
                                     'without music gives the model the best reference for tone and accent.')
+                        reference_full_text = gr.Textbox(label='Reference transcript', lines=4, interactive=False,
+                            placeholder='Your recording is transcribed automatically after upload or recording.',
+                            elem_id='reference-transcript')
+                        transcribe = gr.Button('Transcribe reference', size='sm')
                         with gr.Accordion('Selected reference and transcript', open=False):
                             with gr.Row():
                                 start = gr.Number(value=0, minimum=0, label='Sample start (seconds)')
@@ -234,14 +264,14 @@ def create_app():
                             sample_info = gr.Markdown('Add a speech recording up to one minute long.')
                             reference_language = gr.Dropdown(language_options, value='auto', label='Reference language')
                             reference_text = gr.Textbox(label='Words in the selected reference (optional)', lines=3,
-                                placeholder='Hindi and Malayalam use automatic transcription when this is blank.')
+                                placeholder='Automatically transcribed for English, Hindi, and Malayalam.')
                             gr.Markdown('For stronger Indic pronunciation, review these words against the selected clip. '
                                         'The text below is what the output will say.')
                         gr.HTML('<div class="step-label">02 / WORDS & LANGUAGE</div>')
                         with gr.Row():
                             language = gr.Dropdown(language_options, value='auto', label='Speech language')
-                            quality = gr.Radio(list(INDIC_QUALITIES), value='Detailed', label='Indic quality',
-                                info='Indic cloning is experimental. Word checking takes longer and can retry Malayalam pronunciation once. Its first recognition download is about 3.1 GB.')
+                            quality = gr.Radio(list(INDIC_QUALITIES), value='Detailed', label='Generation quality',
+                                info='Word checking can try one alternate English or Malayalam reading. It takes longer and preserves the original if the voice comparison worsens.')
                         text = gr.Textbox(label='Text to speak', lines=6, max_lines=12, max_length=5000,
                                           placeholder='Type in English, Hindi, or Malayalam...', elem_id='speech-text')
                         gr.Markdown('Up to 5,000 characters. Longer text is generated in passages and joined into one WAV.')
@@ -302,10 +332,14 @@ def create_app():
                 clear = gr.Button('Delete recordings & exports', size='sm')
                 clear_refs = gr.Button('Delete cached voice data', size='sm')
         gr.HTML('<div class="footer">Voice Studio | Self-hostable voice cloning and audio diagnostics</div>')
-        synthesize.click(generate, [source, text, start, end, language, quality, reference_text, reference_language],
+        synthesize.click(generate, [source, text, start, end, language, quality, reference_text, reference_language, reference_full_text],
                          [job_id, status, audio, wav, delivered], concurrency_id='studio', api_name='generate_speech')
         for component in (source, start, end):
             component.change(inspect_sample, [source, start, end], [selected, sample_info, reference_text], concurrency_id='selection')
+        for event in (source.upload, source.stop_recording, transcribe.click):
+            event(start_transcription, [source, start, end, reference_language],
+                  [job_id, status, delivered], concurrency_id='studio', api_name=False)
+        source.clear(lambda: ('', ''), outputs=[reference_text, reference_full_text], api_name=False)
         cancel.click(manager.cancel, outputs=status, queue=False, api_name='cancel_generation')
         use_result.click(lambda ref, out, words: (ref or None, out or None, words),
                          [last_reference, last_audio, last_text], [analysis_reference, analysis_output, expected], concurrency_id='studio')
@@ -313,7 +347,7 @@ def create_app():
             audit_language, last_reference, last_audio], [job_id, status, delivered], concurrency_id='studio')
         release.click(lambda: safe_storage(manager.release), outputs=status, concurrency_id='studio', api_name='release_model')
         clear_refs.click(lambda: safe_storage(lambda: manager.clear(references=True)), outputs=status, concurrency_id='studio')
-        reset_outputs = [source, text, audio, wav, selected, reference_text, analysis_reference, analysis_output,
+        reset_outputs = [source, text, audio, wav, selected, reference_text, reference_full_text, analysis_reference, analysis_output,
                          analysis_json, analysis_csv, analysis_archive, analysis_plot, last_audio, last_reference,
                          last_text, job_id, delivered, logs, log_file, analysis_table, analysis_segments,
                          analysis_words, analysis_raw, expected, analysis_summary, sample_info]
@@ -330,11 +364,16 @@ def create_app():
             return [message]+[empty(item) for item in reset_outputs]
         clear.click(clear_all, outputs=[status]+reset_outputs, concurrency_id='studio')
         output_names = ('status', 'logs', 'log_file', 'audio', 'wav', 'selected', 'delivered', 'last_audio',
-            'last_reference', 'last_text', 'reference_text', 'analysis_summary', 'analysis_table', 'analysis_segments',
-            'analysis_words', 'analysis_plot', 'analysis_json', 'analysis_csv', 'analysis_archive', 'analysis_raw')
+            'last_reference', 'last_text', 'reference_text', 'reference_full_text', 'analysis_summary', 'analysis_table', 'analysis_segments',
+            'analysis_words', 'analysis_plot', 'analysis_json', 'analysis_csv', 'analysis_archive', 'analysis_raw',
+            'source', 'start', 'end', 'reference_language', 'synthesize', 'transcribe', 'compare')
         outputs = {name: value for name, value in locals().copy().items() if name in output_names}
         def poll_ui(job, previous):
             updates = poll_updates(job, previous)
+            with manager.lock:
+                idle = not manager.active
+            for name in ('source', 'start', 'end', 'reference_language', 'synthesize', 'transcribe', 'compare'):
+                updates[name] = gr.update(interactive=idle)
             return {outputs[key]: value for key, value in updates.items()} if updates else (gr.skip(),)*len(outputs)
         gr.Timer(1).tick(poll_ui, [job_id, delivered], list(outputs.values()), queue=False,
                          show_progress='hidden', api_name=False)

@@ -48,6 +48,41 @@ def split_text(text, limit=240):
     return chunks
 
 
+def split_english_text(text, limit=120, max_words=16):
+    """Keep English utterances short, including prompts without punctuation."""
+    text = re.sub(r'\s+', ' ', validate_text(text))
+    chunks = []
+    while text:
+        words = list(re.finditer(r'\S+', text))
+        cut = min(len(text), words[min(len(words), max_words)-1].end())
+        if cut > limit:
+            cut = text.rfind(' ', 0, limit+1)
+        if cut <= 0:
+            raise AudioError('A word is too long. Add spaces or punctuation to the text.')
+        # Prefer a sentence or clause boundary over cutting through a thought.
+        boundaries = list(re.finditer(r'[.!?;,](?=\s|$)', text[:cut]))
+        if boundaries:
+            cut = boundaries[-1].end()
+        elif cut < len(text):
+            clauses = list(re.finditer(
+                r'\s+(?=(?:I (?:am|have|study|just|will|can|want|like)|This (?:is|was)|'
+                r'That (?:is|was)|We (?:are|have|will)|It (?:is|was)|My \S+ (?:is|has|can|will))\b)',
+                text[:cut], re.I))
+            clauses = [item for item in clauses if len(text[:item.start()].split()) >= 5]
+            if clauses:
+                cut = clauses[0].start()
+        chunks.append(text[:cut].strip())
+        text = text[cut:].strip()
+    return chunks
+
+
+def english_model_text(text):
+    text = re.sub(r'\b(?:ai|cpu|gpu|api|tts|usb|html|css|url|pdf|sql|ram|ui)\b',
+                  lambda match: match.group().upper(), text, flags=re.I)
+    text = text[0].upper()+text[1:]
+    return text if text[-1] in '.!?' else text+'.'
+
+
 def prepare_sample(source, folder, start=0, end=0):
     start, end = float(start or 0), float(end or 0)
     if not np.isfinite([start, end]).all() or start < 0 or end < 0:
@@ -194,7 +229,11 @@ class SpeechEngine:
 
     def synthesize(self, request, folder, progress, prepared=None):
         started = active_time()
-        chunks = split_text(request.get('text'))
+        english = request.get('language', 'en') == 'en'
+        chunks = (split_english_text(request.get('text'),
+                    limit=getattr(self, 'english_max_chars', 120),
+                    max_words=getattr(self, 'english_max_words', 16))
+                  if english else split_text(request.get('text')))
         progress('Preparing the voice sample')
         sample, preview, digest = prepared or prepare_sample(
             request['source'], folder, request.get('start'), request.get('end'))
@@ -206,7 +245,7 @@ class SpeechEngine:
             for index, text in enumerate(chunks):
                 def report(message):
                     progress(f'Passage {index+1}/{len(chunks)}: {message}')
-                wav = self.generate_chunk(text, voice, report)
+                wav = self.generate_chunk(english_model_text(text) if english else text, voice, report)
                 chunk_metrics.append(dict(getattr(self, 'last_chunk_metrics', {})))
                 wav *= min(1, 0.98 / max(float(np.max(np.abs(wav))), 0.001))
                 output.write(wav)
@@ -226,6 +265,9 @@ class SpeechEngine:
                   'model': getattr(self, 'model_id', MODEL_ID),
                   'precision': dict(getattr(self, 'precision', PRECISION)),
                   'language': request.get('language', 'en'), 'text': request['text'],
+                  'reference_text': request.get('reference_text', ''),
+                  'reference_full_text': request.get('reference_full_text', ''),
+                  'passage_texts': chunks,
                   'chunk_timings': chunk_metrics}
         (folder / 'speech-metrics.json').write_text(json.dumps(result, indent=2), encoding='utf-8')
         return result

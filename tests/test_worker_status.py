@@ -25,7 +25,8 @@ def test_atomic_status_retries_a_brief_reader_lock(tmp_path, monkeypatch):
 def test_progress_file_lock_does_not_fail_speech_request(tmp_path, monkeypatch):
     from studio import speech
     request = tmp_path/'request.json'
-    request.write_text(json.dumps({'mode':'clone','source':'fixture.wav','text':'Hello there.','language':'en'}))
+    request.write_text(json.dumps({'mode':'clone','source':'fixture.wav','text':'Hello there.','language':'en',
+                                  'reference_text':'known words'}))
     monkeypatch.setattr(speech, 'prepare_sample', lambda *args, **kwargs: (None, tmp_path/'reference.wav', 'digest'))
     write = worker.atomic_json
     def locked_status(path, value):

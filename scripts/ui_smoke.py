@@ -38,6 +38,9 @@ def main():
         page.get_by_role('button', name='Upload file', exact=True).click()
         with page.expect_response(lambda r: '/upload' in r.url and r.request.method == 'POST', timeout=60000):
             page.locator('#voice-sample input[type=file]').set_input_files(str(args.reference))
+        page.wait_for_function("""() => document.querySelector('#reference-transcript textarea')?.value.trim()
+            && [...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Generate speech')?.disabled === false""",
+            timeout=900000)
         page.locator('#speech-text textarea').fill('Hello there. These words are generated in the voice from my sample.')
         page.screenshot(path=str(screenshots / 'cloning-desktop.png'), full_page=True)
         if not args.layout_only:

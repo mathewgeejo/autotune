@@ -37,7 +37,29 @@ def test_serving_state_retains_model_for_plain_warm_generation(tmp_path, monkeyp
     previous = weakref.ref(state['engine'])
     monkeypatch.setattr(speech, 'prepare_sample', lambda *args, **kwargs: (np.zeros((1, 1)), tmp_path/'reference.wav', 'digest'))
     request = tmp_path/'request.json'
-    request.write_text(json.dumps({'mode': 'clone', 'source': 'source.wav', 'text': 'hello', 'language': 'en'}), encoding='utf-8')
+    request.write_text(json.dumps({'mode': 'clone', 'source': 'source.wav', 'text': 'hello', 'language': 'en',
+                                  'reference_text': 'known words'}), encoding='utf-8')
     state['engine'] = worker.run(request, state=state)
     assert state['engine'] is previous()
     assert state['engine'].calls == 1
+
+
+def test_english_blank_reference_is_transcribed_after_releasing_warm_model(tmp_path, monkeypatch):
+    class Engine:
+        engine_key = ('en',)
+        def synthesize(self, request, *args, **kwargs):
+            assert request['reference_text'] == 'Selected clip words.'
+            assert request['reference_full_text'] == 'The complete recording words.'
+            return {'audio': 'completed.wav', 'reference_text': request['reference_text']}
+    state = {'engine': Engine()}
+    previous = weakref.ref(state['engine'])
+    monkeypatch.setattr(speech, 'prepare_sample', lambda *args, **kwargs: (None, tmp_path/'clip.wav', 'digest'))
+    def transcribe(*args):
+        assert previous() is None
+        return {'reference_text': 'Selected clip words.', 'reference_full_text': 'The complete recording words.'}
+    monkeypatch.setattr(worker, 'transcribe_reference', transcribe)
+    monkeypatch.setattr(speech, 'SpeechEngine', lambda progress: Engine())
+    request = tmp_path/'request.json'
+    request.write_text(json.dumps({'mode': 'clone', 'source': 'source.wav', 'text': 'Hello.', 'language': 'en'}))
+    assert worker.run(request, state=state) is not None
+    assert (tmp_path/'result.json').is_file()
