@@ -36,6 +36,20 @@ The pinned Q8 and FP32 waveform decoders expose four corresponding random operat
 
 FP32 rendering is faster here, but a consistent speaker-identity improvement is not demonstrated. Both versions retain the complete ending and the same recognized names. Word-score differences include the recognizer changing a requested typo and grammar; the higher score alone does not establish worse speech. The app retains the existing decoder while reference-encoder quality is investigated. Reports: `data/quality/user-english-decoder-matched-noise.json` and `data/quality/user-english-decoder-matched-noise-2026.json`.
 
+### Reference encoder precision and staged publisher baseline
+
+The pinned FP32 reference encoder was downloaded and hash-verified. For the identical selected recording, its decoder speaker embedding and acoustic features match the Q8 encoder exactly. The text-model conditioning differs (relative RMS error 0.2058; cosine 0.9788), as do the discrete reference tokens. A complete render changes only this conditioning encoder; the Q4 text model and Q8 waveform decoder remain fixed.
+
+| Reference / seed | Q8 / FP32 encoder speaker cosine | Q8 / FP32 encoder word error |
+| --- | --- | --- |
+| User reference / 666 | 0.8875 / 0.9079 | 0.1613 / 0.1935 |
+| User reference / 2026 | 0.8909 / 0.8829 | 0.1613 / 0.1935 |
+| Public female reference / 666 | 0.9526 / 0.9472 | 0 / 0 |
+
+This does not demonstrate a consistent encoder-only improvement. Paired global seeds are insufficient to match waveform noise when the encoder changes the generated token lengths. Reports are `data/quality/user-english-encoder-precision.json`, `data/quality/user-english-encoder-precision-2026.json`, and `data/quality/en-jo-encoder-precision.json`. A short isolated name-phrase recognition control returned an implausible transcript for natural speech; it is retained as a failed control, not evidence that the clone pronounces the name better.
+
+The complete original FP32 components are now available for a separate publisher-baseline trial. Text-token composition and waveform rendering have been separated without changing the inference contract, allowing encoder, text models, and decoder sessions to run in distinct memory stages. The regression suite passes 83 tests, including preservation of the final spoken token with text models released before decoding. No production precision default or application build changed.
+
 ## 2 November: reference transient and fair Malayalam comparison
 
 The original Malayalam FLEURS recording contains an isolated peak at 9 ms, separated from speech by a long quiet interval. It constrained reference normalization and the independent verifier's input level. The new selector excludes isolated, extreme boundary transients while preserving speech and interior pauses. It does not denoise or pitch-shift the voice.

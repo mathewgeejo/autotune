@@ -170,9 +170,8 @@ class SpeechEngine:
         temporary.replace(path)
         return values, False
 
-    def generate_chunk(self, text, voice, progress):
-        composing_started = active_time()
-        cond, prompt, embedding, features = voice
+    def compose_tokens(self, text, voice, progress):
+        cond, prompt, _, _ = voice
         language = self.sessions['language_model']
         ids = np.array([self.tokenizer.encode(text).ids], dtype=np.int64)
         embeds = self.sessions['embed_tokens'].run(None, {'input_ids': ids})[0]
@@ -214,17 +213,27 @@ class SpeechEngine:
             raise AudioError('No speech was generated. Try a clearer sample or a longer sentence.')
         speech_tokens = np.concatenate((prompt, np.array([tokens[1:]], dtype=np.int64),
                                        np.full((batch, 3), SILENCE_TOKEN, dtype=np.int64)), axis=1)
+        return speech_tokens, len(tokens)-1
+
+    def render_tokens(self, speech_tokens, voice, progress):
+        _, _, embedding, features = voice
         progress('Rendering the speech waveform')
-        decoder_started = active_time()
         wav = self.sessions['conditional_decoder'].run(None, {
             'speech_tokens': speech_tokens, 'speaker_embeddings': embedding,
             'speaker_features': features})[0].reshape(-1)
         if not len(wav) or not np.isfinite(wav).all() or np.max(np.abs(wav)) < 0.001:
             raise AudioError('The voice model returned empty audio. Try another clear speech sample.')
+        return wav
+
+    def generate_chunk(self, text, voice, progress):
+        composing_started = active_time()
+        speech_tokens, count = self.compose_tokens(text, voice, progress)
+        decoder_started = active_time()
+        wav = self.render_tokens(speech_tokens, voice, progress)
         self.last_chunk_metrics = {'language_model_seconds': decoder_started-composing_started,
                                    'waveform_decoder_seconds': active_time()-decoder_started,
                                    'waveform_decoder_threads': getattr(self, 'decoder_threads', 2),
-                                   'speech_tokens': len(tokens)-1, 'samples': len(wav)}
+                                   'speech_tokens': count, 'samples': len(wav)}
         return wav
 
     def synthesize(self, request, folder, progress, prepared=None):

@@ -62,7 +62,8 @@ def test_sample_selection_bounds_silence_and_cache_identity(tmp_path):
         prepare_sample(source, tmp_path)
 
 
-def test_stop_token_does_not_discard_the_last_spoken_token():
+@pytest.mark.parametrize('staged', [False, True])
+def test_stop_token_does_not_discard_the_last_spoken_token(staged):
     """The published example slices [1:-1]; our loop excludes STOP itself."""
     class Tokenizer:
         def encode(self, text):
@@ -94,7 +95,16 @@ def test_stop_token_does_not_discard_the_last_spoken_token():
     engine.sessions = {'embed_tokens': Embedding(), 'language_model': Language(),
                        'conditional_decoder': Decoder()}
     voice = [np.zeros((1, 2, 4), dtype=np.float32), np.array([[7]]), None, None]
-    assert len(engine.generate_chunk('Hello world.', voice, lambda text: None)) == 24000
+    if staged:
+        decoder = engine.sessions.pop('conditional_decoder')
+        tokens, count = engine.compose_tokens('Hello world.', voice, lambda text: None)
+        assert count == 2
+        engine.sessions.clear()
+        engine.sessions['conditional_decoder'] = decoder
+        waveform = engine.render_tokens(tokens, voice, lambda text: None)
+    else:
+        waveform = engine.generate_chunk('Hello world.', voice, lambda text: None)
+    assert len(waveform) == 24000
 
 
 def test_reference_limits_and_single_transient_are_rejected(tmp_path):
