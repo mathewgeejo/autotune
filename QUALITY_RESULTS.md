@@ -25,6 +25,17 @@ The optional word-check setting now supports English with one shorter-passage re
 
 A real checked English request completed its five-passage retry and retained the default because recognized word/grapheme errors tied. The default/candidate speaker scores were 0.8818/0.9102; the guard requires content improvement. A subsequent browser upload and generation of the original prompt passed end to end: cached full/selected transcription appeared in three seconds, the four-passage 12.92-second export finished in 66 seconds, and downloaded WAV bytes matched exactly one new job. Peak sampled generation-worker RSS was 854 MB; there were no page errors or mobile overflow. Report: `data/quality/user-english-ui-generation.json`.
 
+### Decoder precision with matched internal noise
+
+The pinned Q8 and FP32 waveform decoders expose four corresponding random operations. The new isolated precision trial captures their noise tensors and supplies those exact tensors as graph inputs to both models, alongside identical speech tokens and speaker features. Across four passages and two seeds, the Q8 replay reproduces the capture waveform exactly (relative RMS error zero). External weights are hard-linked, and the cache and production model choice remain unchanged.
+
+| Seed | Q8 / FP32 speaker cosine | Q8 / FP32 word error | Q8 / FP32 decoding seconds |
+| --- | --- | --- | --- |
+| 666 | 0.8875 / 0.8780 | 0.1613 / 0.1935 | 37.49 / 20.81 |
+| 2026 | 0.8909 / 0.8953 | 0.1613 / 0.1935 | 26.41 / 20.03 |
+
+FP32 rendering is faster here, but a consistent speaker-identity improvement is not demonstrated. Both versions retain the complete ending and the same recognized names. Word-score differences include the recognizer changing a requested typo and grammar; the higher score alone does not establish worse speech. The app retains the existing decoder while reference-encoder quality is investigated. Reports: `data/quality/user-english-decoder-matched-noise.json` and `data/quality/user-english-decoder-matched-noise-2026.json`.
+
 ## 2 November: reference transient and fair Malayalam comparison
 
 The original Malayalam FLEURS recording contains an isolated peak at 9 ms, separated from speech by a long quiet interval. It constrained reference normalization and the independent verifier's input level. The new selector excludes isolated, extreme boundary transients while preserving speech and interior pauses. It does not denoise or pitch-shift the voice.
